@@ -719,6 +719,23 @@ export function ChevronRightIcon({ className = "w-4.5 h-4.5" }: IconProps) {
   );
 }
 
+export function ChevronUpIcon({ className = "w-4.5 h-4.5" }: IconProps) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M6 15l6 -6l6 6" />
+    </svg>
+  );
+}
+
 export function ShareIcon({ className = "w-4.5 h-4.5" }: IconProps) {
   return (
     <svg

@@ -51,10 +51,8 @@ export function EditorWidthHandles({ containerRef }: EditorWidthHandlesProps) {
     const proseMirror =
       containerRef.current.querySelector<HTMLElement>(".ProseMirror");
     if (proseMirror) {
-      const maxWidth = getComputedStyle(proseMirror).maxWidth;
-      if (maxWidth && maxWidth !== "none") {
-        const editorPx =
-          maxWidth === "100%" ? containerWidth : parseFloat(maxWidth);
+      const editorPx = proseMirror.getBoundingClientRect().width;
+      if (Number.isFinite(editorPx) && editorPx > 0) {
         const clampedEditor = Math.min(editorPx, containerWidth);
         setHandleOffset((containerWidth - clampedEditor) / 2);
         return;
@@ -75,11 +73,12 @@ export function EditorWidthHandles({ containerRef }: EditorWidthHandlesProps) {
 
   const getCurrentEditorWidth = useCallback((): number => {
     if (!containerRef.current) return 768;
-    const proseMirror = containerRef.current.querySelector(".ProseMirror");
+    const proseMirror =
+      containerRef.current.querySelector<HTMLElement>(".ProseMirror");
     if (proseMirror) {
-      const maxWidth = getComputedStyle(proseMirror).maxWidth;
-      if (maxWidth && maxWidth !== "none" && maxWidth !== "100%") {
-        return parseFloat(maxWidth);
+      const measuredWidth = proseMirror.getBoundingClientRect().width;
+      if (Number.isFinite(measuredWidth) && measuredWidth > 0) {
+        return measuredWidth;
       }
     }
     if (editorWidth === "custom") return customEditorWidthPx;
@@ -174,8 +173,11 @@ export function EditorWidthHandles({ containerRef }: EditorWidthHandlesProps) {
     setEditorWidth("normal");
   }, [setEditorWidth]);
 
-  // Don't render handles if full width or container is too narrow
-  if ((editorWidth === "full" || handleOffset === 0) && !isDragging)
+  // Fixed preset widths only: show handles only for legacy custom mode.
+  if (editorWidth !== "custom" && !isDragging) return null;
+
+  // Don't render handles when container is too narrow.
+  if (handleOffset === 0 && !isDragging)
     return null;
 
   return (

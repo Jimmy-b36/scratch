@@ -13,13 +13,61 @@ export interface Note {
   modified: number;
 }
 
+export interface VaultInfo {
+  id: string;
+  name: string;
+  path: string;
+  lastOpenedAt: number;
+  isFavorite: boolean;
+}
+
 export interface ThemeSettings {
   mode: "light" | "dark" | "system";
+  customLightColors?: ThemeColors;
+  customDarkColors?: ThemeColors;
+  themePreset?:
+    | "scratch"
+    | "catppuccin"
+    | "tokyo-night"
+    | "github"
+    | "gruvbox-material"
+    | "kanagawa"
+    | "solarized"
+    | "rose-pine"
+    | "moonlight"
+    | "custom";
+}
+
+export interface ThemeColors {
+  bg?: string;
+  bgSecondary?: string;
+  bgMuted?: string;
+  bgEmphasis?: string;
+  text?: string;
+  textMuted?: string;
+  textInverse?: string;
+  border?: string;
+  accent?: string;
+  link?: string;
+  linkHover?: string;
+  headingH1?: string;
+  headingH2?: string;
+  headingH3?: string;
+  headingH4?: string;
+  headingH5?: string;
+  headingH6?: string;
+  bold?: string;
 }
 
 export type FontFamily = "system-sans" | "serif" | "monospace";
 export type TextDirection = "ltr" | "rtl";
-export type EditorWidth = "narrow" | "normal" | "wide" | "full" | "custom";
+export type EditorWidth =
+  | "narrow"
+  | "normal"
+  | "wide"
+  | "full"
+  | "dynamic"
+  | "custom";
 
 export interface EditorFontSettings {
   baseFontFamily?: FontFamily;

@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, NoteMetadata } from "../types/note";
+import type { Note, NoteMetadata, VaultInfo } from "../types/note";
 import * as notesService from "../services/notes";
 import type { SearchResult } from "../services/notes";
 
@@ -20,6 +20,9 @@ interface NotesDataContextValue {
   selectedNoteId: string | null;
   currentNote: Note | null;
   notesFolder: string | null;
+  vaults: VaultInfo[];
+  recentVaults: VaultInfo[];
+  activeVault: VaultInfo | null;
   isLoading: boolean;
   error: string | null;
   searchQuery: string;
@@ -39,6 +42,12 @@ interface NotesActionsContextValue {
   refreshNotes: () => Promise<void>;
   reloadCurrentNote: () => Promise<void>;
   setNotesFolder: (path: string) => Promise<void>;
+  switchVault: (path: string) => Promise<void>;
+  refreshVaults: () => Promise<void>;
+  addVault: (path: string) => Promise<void>;
+  removeVault: (vaultId: string) => Promise<void>;
+  toggleFavoriteVault: (vaultId: string) => Promise<void>;
+  openVaultInNewWindow: (path: string) => Promise<void>;
   search: (query: string) => Promise<void>;
   clearSearch: () => void;
   pinNote: (id: string) => Promise<void>;
@@ -48,11 +57,19 @@ interface NotesActionsContextValue {
 const NotesDataContext = createContext<NotesDataContextValue | null>(null);
 const NotesActionsContext = createContext<NotesActionsContextValue | null>(null);
 
-export function NotesProvider({ children }: { children: ReactNode }) {
+export function NotesProvider({
+  children,
+  initialVaultPath,
+}: {
+  children: ReactNode;
+  initialVaultPath?: string | null;
+}) {
   const [notes, setNotes] = useState<NoteMetadata[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
   const [notesFolder, setNotesFolderState] = useState<string | null>(null);
+  const [vaults, setVaults] = useState<VaultInfo[]>([]);
+  const [recentVaults, setRecentVaults] = useState<VaultInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -74,6 +91,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   notesRef.current = notes;
   // Monotonic counter to ignore stale async search responses
   const searchRequestIdRef = useRef(0);
+
+  const refreshVaults = useCallback(async () => {
+    try {
+      const [allVaults, recents] = await Promise.all([
+        notesService.listVaults(),
+        notesService.listRecentVaults(10),
+      ]);
+      setVaults(allVaults);
+      setRecentVaults(recents);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load vaults");
+    }
+  }, []);
 
   const refreshNotes = useCallback(async () => {
     if (!notesFolder) return;
@@ -296,15 +326,75 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     [refreshNotes]
   );
 
+  const switchVault = useCallback(async (path: string) => {
+    try {
+      await notesService.setActiveVault(path);
+      const activePath = await notesService.getNotesFolder();
+      setNotesFolderState(activePath);
+      setSelectedNoteId(null);
+      setCurrentNote(null);
+      setSearchQuery("");
+      setSearchResults([]);
+      setHasExternalChanges(false);
+      // Start file watcher after setting folder
+      await notesService.startFileWatcher();
+      await refreshNotes();
+      await refreshVaults();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to switch vault");
+    }
+  }, [refreshNotes, refreshVaults]);
+
   const setNotesFolder = useCallback(async (path: string) => {
     try {
       await notesService.setNotesFolder(path);
-      setNotesFolderState(path);
-      // Start file watcher after setting folder
+      const activePath = await notesService.getNotesFolder();
+      setNotesFolderState(activePath);
       await notesService.startFileWatcher();
+      await refreshNotes();
+      await refreshVaults();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to set notes folder");
+    }
+  }, [refreshNotes, refreshVaults]);
+
+  const addVault = useCallback(async (path: string) => {
+    try {
+      await notesService.addVault(path);
+      await refreshVaults();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add vault");
+    }
+  }, [refreshVaults]);
+
+  const removeVault = useCallback(async (vaultId: string) => {
+    try {
+      await notesService.removeVault(vaultId);
+      await refreshVaults();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove vault");
+    }
+  }, [refreshVaults]);
+
+  const toggleFavoriteVault = useCallback(async (vaultId: string) => {
+    try {
+      await notesService.toggleFavoriteVault(vaultId);
+      await refreshVaults();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to set notes folder"
+        err instanceof Error ? err.message : "Failed to update favorite vault"
+      );
+    }
+  }, [refreshVaults]);
+
+  const openVaultInNewWindow = useCallback(async (path: string) => {
+    try {
+      await notesService.openVaultWindow(path);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to open vault in new window"
       );
     }
   }, []);
@@ -377,9 +467,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     async function init() {
       try {
-        const folder = await notesService.getNotesFolder();
-        setNotesFolderState(folder);
-        if (folder) {
+        if (initialVaultPath) {
+          await notesService.setActiveVault(initialVaultPath);
+        }
+        const resolvedFolder = await notesService.getNotesFolder();
+        setNotesFolderState(resolvedFolder);
+        await refreshVaults();
+        if (resolvedFolder) {
           const notesList = await notesService.listNotes();
           setNotes(notesList);
           // Start file watcher
@@ -392,7 +486,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
     }
     init();
-  }, []);
+  }, [initialVaultPath, refreshVaults]);
 
   // Listen for file change events and notify if current note changed externally
   useEffect(() => {
@@ -463,6 +557,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       selectedNoteId,
       currentNote,
       notesFolder,
+      vaults,
+      recentVaults,
+      activeVault: vaults.find((vault) => vault.path === notesFolder) || null,
       isLoading,
       error,
       searchQuery,
@@ -476,6 +573,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       selectedNoteId,
       currentNote,
       notesFolder,
+      vaults,
+      recentVaults,
       isLoading,
       error,
       searchQuery,
@@ -497,6 +596,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       refreshNotes,
       reloadCurrentNote,
       setNotesFolder,
+      switchVault,
+      refreshVaults,
+      addVault,
+      removeVault,
+      toggleFavoriteVault,
+      openVaultInNewWindow,
       search,
       clearSearch,
       pinNote,
@@ -511,6 +616,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       refreshNotes,
       reloadCurrentNote,
       setNotesFolder,
+      switchVault,
+      refreshVaults,
+      addVault,
+      removeVault,
+      toggleFavoriteVault,
+      openVaultInNewWindow,
       search,
       clearSearch,
       pinNote,
