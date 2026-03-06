@@ -8,6 +8,8 @@ import {
   XIcon,
   SearchIcon,
   SearchOffIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
 } from "../icons";
 import { mod, shift, isMac } from "../../lib/platform";
 
@@ -18,6 +20,7 @@ interface SidebarProps {
 export function Sidebar({ onOpenSettings }: SidebarProps) {
   const { createNote, notes, search, searchQuery, clearSearch } = useNotes();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [allFoldersExpanded, setAllFoldersExpanded] = useState(false);
   const [inputValue, setInputValue] = useState(searchQuery);
   const debounceRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -78,6 +81,17 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
       window.removeEventListener("open-sidebar-search", handleOpenSidebarSearch);
   }, []);
 
+  useEffect(() => {
+    const handleFolderTreeState = (event: Event) => {
+      const detail = (event as CustomEvent<{ allExpanded?: boolean }>).detail;
+      setAllFoldersExpanded(Boolean(detail?.allExpanded));
+    };
+
+    window.addEventListener("folder-tree-state", handleFolderTreeState);
+    return () =>
+      window.removeEventListener("folder-tree-state", handleFolderTreeState);
+  }, []);
+
   const handleSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Escape") {
@@ -100,6 +114,10 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
     clearSearch();
   }, [clearSearch]);
 
+  const toggleAllFolders = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("toggle-all-folders"));
+  }, []);
+
   return (
     <div className="w-64 h-full bg-bg-secondary border-r border-border flex flex-col select-none">
       {/* Drag region */}
@@ -112,6 +130,24 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
           </div>
         </div>
         <div className="flex items-center gap-px">
+          <IconButton
+            onClick={toggleAllFolders}
+            title="Toggle Folder Tree"
+          >
+            <div className="flex flex-col leading-none -space-y-1">
+              {allFoldersExpanded ? (
+                <>
+                  <ChevronDownIcon className="w-3.5 h-3.5 stroke-[2]" />
+                  <ChevronUpIcon className="w-3.5 h-3.5 stroke-[1.6] text-text-muted" />
+                </>
+              ) : (
+                <>
+                  <ChevronUpIcon className="w-3.5 h-3.5 stroke-[2]" />
+                  <ChevronDownIcon className="w-3.5 h-3.5 stroke-[1.6] text-text-muted" />
+                </>
+              )}
+            </div>
+          </IconButton>
           <IconButton
             onClick={toggleSearch}
             title={`Search Notes (${mod}${isMac ? "" : "+"}${shift}${isMac ? "" : "+"}F)`}

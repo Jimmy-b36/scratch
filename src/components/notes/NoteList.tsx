@@ -190,7 +190,6 @@ export function NoteList() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
-  const initializedFolderStateRef = useRef(false);
 
   // Load settings when notes change
   useEffect(() => {
@@ -295,8 +294,7 @@ export function NoteList() {
   const allFolderPaths = useMemo(() => {
     const paths: string[] = [];
     const walk = (node: FolderTreeNode) => {
-      const children = Array.from(node.children.values());
-      for (const child of children) {
+      for (const child of node.children.values()) {
         paths.push(child.path);
         walk(child);
       }
@@ -304,15 +302,6 @@ export function NoteList() {
     walk(folderTree);
     return paths;
   }, [folderTree]);
-
-  useEffect(() => {
-    if (!searchQuery.trim() && !initializedFolderStateRef.current) {
-      if (allFolderPaths.length > 0) {
-        setExpandedFolders(new Set(allFolderPaths));
-      }
-      initializedFolderStateRef.current = true;
-    }
-  }, [allFolderPaths, searchQuery]);
 
   useEffect(() => {
     if (!selectedNoteId || !selectedNoteId.includes("/")) return;
@@ -350,16 +339,42 @@ export function NoteList() {
     });
   }, []);
 
+  const toggleAllFolders = useCallback(() => {
+    if (allFolderPaths.length === 0) return;
+    setExpandedFolders((prev) => {
+      const allExpanded = allFolderPaths.every((path) => prev.has(path));
+      return allExpanded ? new Set<string>() : new Set(allFolderPaths);
+    });
+  }, [allFolderPaths]);
+
+  useEffect(() => {
+    const allExpanded =
+      allFolderPaths.length > 0 &&
+      allFolderPaths.every((path) => expandedFolders.has(path));
+    window.dispatchEvent(
+      new CustomEvent("folder-tree-state", {
+        detail: { allExpanded },
+      }),
+    );
+  }, [expandedFolders, allFolderPaths]);
+
   // Listen for focus request from editor (when Escape is pressed)
   useEffect(() => {
     const handleFocusNoteList = () => {
       containerRef.current?.focus();
     };
+    const handleToggleAllFolders = () => {
+      toggleAllFolders();
+    };
 
     window.addEventListener("focus-note-list", handleFocusNoteList);
+    window.addEventListener("toggle-all-folders", handleToggleAllFolders);
     return () =>
-      window.removeEventListener("focus-note-list", handleFocusNoteList);
-  }, []);
+      {
+        window.removeEventListener("focus-note-list", handleFocusNoteList);
+        window.removeEventListener("toggle-all-folders", handleToggleAllFolders);
+      };
+  }, [toggleAllFolders]);
 
   if (isLoading && notes.length === 0) {
     return (

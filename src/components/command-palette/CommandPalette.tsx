@@ -411,6 +411,15 @@ export function CommandPalette({
           onClose();
         },
       },
+      {
+        id: "toggle-folder-tree",
+        label: "Toggle Folder Tree",
+        icon: <FoldersIcon className="w-4.5 h-4.5 stroke-[1.5]" />,
+        action: () => {
+          window.dispatchEvent(new CustomEvent("toggle-all-folders"));
+          onClose();
+        },
+      },
     );
 
     // Open notes folder

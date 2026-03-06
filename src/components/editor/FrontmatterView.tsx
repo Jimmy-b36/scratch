@@ -135,6 +135,7 @@ export function FrontmatterView({ editor, node, getPos }: ReactNodeViewProps) {
   );
   const [showRaw, setShowRaw] = useState(false);
   const [rawYaml, setRawYaml] = useState(node.textContent || "");
+  const [tagDrafts, setTagDrafts] = useState<Record<number, string>>({});
 
   useEffect(() => {
     const parsed = parseFrontmatterText(node.textContent || "");
@@ -167,6 +168,15 @@ export function FrontmatterView({ editor, node, getPos }: ReactNodeViewProps) {
     replaceNodeText(yaml);
   };
 
+  const normalizeTag = (value: string): string =>
+    value.trim().replace(/^#+/, "").trim();
+
+  const setFieldValues = (fieldIndex: number, values: string[]) => {
+    const next = [...fields];
+    next[fieldIndex] = { ...next[fieldIndex], values };
+    updateFields(next);
+  };
+
   return (
     <NodeViewWrapper className="frontmatter-card not-prose" contentEditable={false}>
       <div className="frontmatter-card-header">
@@ -183,7 +193,8 @@ export function FrontmatterView({ editor, node, getPos }: ReactNodeViewProps) {
       <div className="frontmatter-fields">
         {fields.map((field, idx) => {
           const csvValue = toCsv(field.values);
-          const isTagLike = field.key.toLowerCase() === "tags";
+          const isTagLike =
+            field.key.toLowerCase() === "tags" && field.kind === "list";
           return (
             <div key={`${field.key}-${idx}`} className="frontmatter-row">
               <input
@@ -196,19 +207,69 @@ export function FrontmatterView({ editor, node, getPos }: ReactNodeViewProps) {
                 }}
                 placeholder="key"
               />
-              <input
-                className="frontmatter-value"
-                value={csvValue}
-                onChange={(e) => {
-                  const next = [...fields];
-                  next[idx] = {
-                    ...field,
-                    values: field.kind === "list" ? fromCsv(e.target.value) : [e.target.value],
-                  };
-                  updateFields(next);
-                }}
-                placeholder={field.kind === "list" ? "item1, item2" : "value"}
-              />
+              {isTagLike ? (
+                <div className="frontmatter-tag-editor">
+                  {field.values.map((tag, tagIndex) => (
+                    <button
+                      key={`${tag}-${tagIndex}`}
+                      type="button"
+                      className="frontmatter-tag-chip"
+                      onClick={() =>
+                        setFieldValues(
+                          idx,
+                          field.values.filter((_, i) => i !== tagIndex),
+                        )
+                      }
+                    >
+                      #{tag.replace(/^#/, "")}
+                    </button>
+                  ))}
+                  <input
+                    className="frontmatter-tag-input"
+                    value={tagDrafts[idx] || ""}
+                    onChange={(e) =>
+                      setTagDrafts((prev) => ({ ...prev, [idx]: e.target.value }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== ",") return;
+                      e.preventDefault();
+                      const normalized = normalizeTag(tagDrafts[idx] || "");
+                      if (!normalized) return;
+                      if (field.values.includes(normalized)) {
+                        setTagDrafts((prev) => ({ ...prev, [idx]: "" }));
+                        return;
+                      }
+                      setFieldValues(idx, [...field.values, normalized]);
+                      setTagDrafts((prev) => ({ ...prev, [idx]: "" }));
+                    }}
+                    onBlur={() => {
+                      const normalized = normalizeTag(tagDrafts[idx] || "");
+                      if (!normalized || field.values.includes(normalized)) {
+                        setTagDrafts((prev) => ({ ...prev, [idx]: "" }));
+                        return;
+                      }
+                      setFieldValues(idx, [...field.values, normalized]);
+                      setTagDrafts((prev) => ({ ...prev, [idx]: "" }));
+                    }}
+                    placeholder="Add tag..."
+                  />
+                </div>
+              ) : (
+                <input
+                  className="frontmatter-value"
+                  value={csvValue}
+                  onChange={(e) => {
+                    const next = [...fields];
+                    next[idx] = {
+                      ...field,
+                      values:
+                        field.kind === "list" ? fromCsv(e.target.value) : [e.target.value],
+                    };
+                    updateFields(next);
+                  }}
+                  placeholder={field.kind === "list" ? "item1, item2" : "value"}
+                />
+              )}
               <button
                 className="frontmatter-remove-btn"
                 type="button"
@@ -219,15 +280,6 @@ export function FrontmatterView({ editor, node, getPos }: ReactNodeViewProps) {
               >
                 Remove
               </button>
-              {isTagLike && field.values.length > 0 && (
-                <div className="frontmatter-tag-list">
-                  {field.values.map((tag) => (
-                    <span key={tag} className="frontmatter-tag-chip">
-                      #{tag.replace(/^#/, "")}
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}

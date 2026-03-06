@@ -672,7 +672,7 @@ html.dark {
   display: grid;
   grid-template-columns: minmax(8rem, 10rem) minmax(0, 1fr) auto;
   gap: 0.45rem;
-  align-items: start;
+  align-items: center;
 }
 
 .frontmatter-key,
@@ -705,11 +705,17 @@ html.dark {
   color: var(--color-text-muted);
 }
 
-.frontmatter-tag-list {
-  grid-column: 2 / 4;
+.frontmatter-tag-editor {
+  min-height: 2.2rem;
+  display: flex;
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.45rem;
+  background: var(--color-bg);
+  padding: 0.28rem 0.38rem;
 }
 
 .frontmatter-tag-chip {
@@ -720,6 +726,21 @@ html.dark {
   padding: 0.1rem 0.45rem;
   font-size: 0.75rem;
   font-weight: 600;
+  cursor: pointer;
+}
+
+.frontmatter-tag-input {
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  min-width: 6rem;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.1rem 0.2rem;
+}
+
+.frontmatter-tag-input:focus {
+  outline: none;
 }
 
 .frontmatter-raw {
