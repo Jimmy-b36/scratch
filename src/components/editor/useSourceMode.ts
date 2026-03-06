@@ -28,6 +28,7 @@ export function useSourceMode({
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceContent, setSourceContent] = useState("");
   const sourceTimeoutRef = useRef<number | null>(null);
+  const lastHandledToggleSignalRef = useRef(0);
 
   const toggleSourceMode = useCallback(() => {
     if (!editor) return;
@@ -52,7 +53,13 @@ export function useSourceMode({
   }, [editor, sourceMode, sourceContent, getMarkdown]);
 
   useEffect(() => {
-    if (toggleSourceModeSignal === 0) return;
+    if (
+      toggleSourceModeSignal === 0 ||
+      toggleSourceModeSignal === lastHandledToggleSignalRef.current
+    ) {
+      return;
+    }
+    lastHandledToggleSignalRef.current = toggleSourceModeSignal;
     toggleSourceMode();
   }, [toggleSourceModeSignal, toggleSourceMode]);
 

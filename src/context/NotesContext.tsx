@@ -324,12 +324,13 @@ export function NotesProvider({
           };
           await notesService.updateSettings(updatedSettings);
           setPinnedNoteIds(nextPinnedIds);
+          await refreshNotes();
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to pin note");
       }
     },
-    []
+    [refreshNotes]
   );
 
   const unpinNote = useCallback(
@@ -345,11 +346,12 @@ export function NotesProvider({
         };
         await notesService.updateSettings(updatedSettings);
         setPinnedNoteIds(nextPinnedIds);
+        await refreshNotes();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to unpin note");
       }
     },
-    []
+    [refreshNotes]
   );
 
   const togglePinNote = useCallback(
