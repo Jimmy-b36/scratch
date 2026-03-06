@@ -16,6 +16,15 @@
   --color-border: rgba(28, 25, 23, 0.08);
   --color-border-solid: #d6d3d1; /* stone-300 - for table borders */
   --color-accent: #1c1917;
+  --color-link: #1d4ed8;
+  --color-link-hover: #1e40af;
+  --color-heading-h1: #111827;
+  --color-heading-h2: #1f2937;
+  --color-heading-h3: #374151;
+  --color-heading-h4: #4b5563;
+  --color-heading-h5: #6b7280;
+  --color-heading-h6: #9ca3af;
+  --color-bold: #7c2d12;
   --color-selection: rgba(250, 204, 21, 0.4); /* Tailwind yellow-400 */
 
   /* Editor font settings - simplified (overridden by ThemeContext) */
@@ -62,6 +71,15 @@
   --color-border: rgba(250, 249, 249, 0.07);
   --color-border-solid: #57534e; /* stone-600 - for table borders */
   --color-accent: #fafaf9;
+  --color-link: #93c5fd;
+  --color-link-hover: #bfdbfe;
+  --color-heading-h1: #f9fafb;
+  --color-heading-h2: #f3f4f6;
+  --color-heading-h3: #e5e7eb;
+  --color-heading-h4: #d1d5db;
+  --color-heading-h5: #9ca3af;
+  --color-heading-h6: #6b7280;
+  --color-bold: #fdba74;
   --color-selection: rgba(253, 224, 71, 0.35); /* Tailwind yellow-300 */
 
   /* Syntax highlighting colors - Dark (GitHub) */
@@ -318,6 +336,7 @@ html.dark {
   font-family: var(--editor-font-family);
   font-size: var(--editor-h1-size);
   font-weight: var(--editor-bold-weight);
+  color: var(--color-heading-h1);
   line-height: 1.2;
   margin-top: 1em;
   margin-bottom: 0.35em;
@@ -327,6 +346,7 @@ html.dark {
   font-family: var(--editor-font-family);
   font-size: var(--editor-h2-size);
   font-weight: var(--editor-bold-weight);
+  color: var(--color-heading-h2);
   line-height: 1.3;
   margin-top: 1em;
   margin-bottom: 0.35em;
@@ -336,6 +356,7 @@ html.dark {
   font-family: var(--editor-font-family);
   font-size: var(--editor-h3-size);
   font-weight: var(--editor-bold-weight);
+  color: var(--color-heading-h3);
   line-height: 1.3;
   margin-top: 1em;
   margin-bottom: 0.5em;
@@ -345,6 +366,7 @@ html.dark {
   font-family: var(--editor-font-family);
   font-size: var(--editor-h4-size);
   font-weight: var(--editor-bold-weight);
+  color: var(--color-heading-h4);
   line-height: 1.3;
   margin-top: 1.25em;
   margin-bottom: 0.5em;
@@ -360,11 +382,19 @@ html.dark {
   margin-bottom: 0.25em;
 }
 
+.prose h5 {
+  color: var(--color-heading-h5);
+}
+
+.prose h6 {
+  color: var(--color-heading-h6);
+}
+
 /* Bold text uses the same weight as headings */
 .prose strong,
 .prose b {
   font-weight: var(--editor-bold-weight);
-  color: var(--color-text);
+  color: var(--color-bold);
 }
 
 /* Code blocks and inline code */
@@ -591,9 +621,117 @@ html.dark {
   overflow-x: auto;
 }
 
+.frontmatter-card {
+  border: 1px dashed var(--color-border);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  margin: 0.75rem 0 1rem;
+  background: color-mix(in srgb, var(--color-bg-secondary) 88%, transparent);
+}
+
+.frontmatter-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.frontmatter-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-heading-h3);
+}
+
+.frontmatter-toggle-btn,
+.frontmatter-add-btn,
+.frontmatter-remove-btn {
+  border: 1px solid var(--color-border);
+  border-radius: 0.45rem;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  padding: 0.25rem 0.45rem;
+  cursor: pointer;
+}
+
+.frontmatter-toggle-btn:hover,
+.frontmatter-add-btn:hover,
+.frontmatter-remove-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-bg-emphasis);
+}
+
+.frontmatter-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.frontmatter-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 10rem) minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: start;
+}
+
+.frontmatter-key,
+.frontmatter-value,
+.frontmatter-raw {
+  border: 1px solid var(--color-border);
+  border-radius: 0.45rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  padding: 0.38rem 0.5rem;
+}
+
+.frontmatter-key::placeholder,
+.frontmatter-value::placeholder {
+  color: var(--color-text-muted);
+}
+
+.frontmatter-actions {
+  margin-top: 0.6rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.frontmatter-tag-summary {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.frontmatter-tag-list {
+  grid-column: 2 / 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.frontmatter-tag-chip {
+  background: color-mix(in srgb, var(--color-link) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-link) 38%, transparent);
+  color: var(--color-link);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.frontmatter-raw {
+  margin-top: 0.6rem;
+  width: 100%;
+  resize: vertical;
+  min-height: 8rem;
+}
+
 /* Links - solid bottom border, muted at rest */
 .prose :where(a):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  color: var(--color-text);
+  color: var(--color-link);
   text-decoration: none;
   font-weight: 500;
   border-bottom: 1px solid currentcolor;
@@ -601,12 +739,12 @@ html.dark {
 }
 .prose
   :where(a):not(:where([class~="not-prose"], [class~="not-prose"] *)):hover {
-  color: var(--color-text-muted);
+  color: var(--color-link-hover);
 }
 
 /* Wikilinks - dashed bottom border to distinguish from external links */
 .prose span[data-wikilink] {
-  color: var(--color-text);
+  color: var(--color-link);
   text-decoration: none;
   font-weight: 500;
   border-bottom: 1px dashed currentcolor;
@@ -614,7 +752,7 @@ html.dark {
   transition: color 0.15s;
 }
 .prose span[data-wikilink]:hover {
-  color: var(--color-text-muted);
+  color: var(--color-link-hover);
 }
 
 /* Blockquotes */
@@ -806,6 +944,31 @@ table.not-prose th {
 table.not-prose td > *,
 table.not-prose th > * {
   margin: 0;
+}
+
+/* Ensure links inside tables use dedicated link colors */
+.prose table a,
+table.not-prose a {
+  color: var(--color-link);
+  text-decoration: none;
+  border-bottom: 1px solid currentcolor;
+  transition: color 0.15s;
+}
+
+.prose table a:hover,
+table.not-prose a:hover {
+  color: var(--color-link-hover);
+}
+
+.prose table span[data-wikilink],
+table.not-prose span[data-wikilink] {
+  color: var(--color-link);
+  border-bottom: 1px dashed currentcolor;
+}
+
+.prose table span[data-wikilink]:hover,
+table.not-prose span[data-wikilink]:hover {
+  color: var(--color-link-hover);
 }
 
 /* TipTap table selection styles */
