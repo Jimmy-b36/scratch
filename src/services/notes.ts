@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Note, NoteMetadata, Settings } from "../types/note";
+import type { Note, NoteMetadata, Settings, VaultInfo } from "../types/note";
 
 export async function getNotesFolder(): Promise<string | null> {
   return invoke("get_notes_folder");
@@ -7,6 +7,34 @@ export async function getNotesFolder(): Promise<string | null> {
 
 export async function setNotesFolder(path: string): Promise<void> {
   return invoke("set_notes_folder", { path });
+}
+
+export async function listVaults(): Promise<VaultInfo[]> {
+  return invoke("list_vaults");
+}
+
+export async function listRecentVaults(limit = 10): Promise<VaultInfo[]> {
+  return invoke("list_recent_vaults", { limit });
+}
+
+export async function addVault(path: string): Promise<VaultInfo> {
+  return invoke("add_vault", { path });
+}
+
+export async function setActiveVault(path: string): Promise<void> {
+  return invoke("set_active_vault", { path });
+}
+
+export async function removeVault(vaultId: string): Promise<void> {
+  return invoke("remove_vault", { vaultId });
+}
+
+export async function toggleFavoriteVault(vaultId: string): Promise<VaultInfo> {
+  return invoke("toggle_favorite_vault", { vaultId });
+}
+
+export async function openVaultWindow(path: string): Promise<void> {
+  return invoke("open_vault_window", { path });
 }
 
 export async function listNotes(): Promise<NoteMetadata[]> {

@@ -31,13 +31,16 @@ import type { AiProvider } from "./services/ai";
 function getWindowMode(): {
   isPreview: boolean;
   previewFile: string | null;
+  initialVaultPath: string | null;
 } {
   const params = new URLSearchParams(window.location.search);
   const mode = params.get("mode");
   const file = params.get("file");
+  const vault = params.get("vault");
   return {
     isPreview: mode === "preview" && !!file,
     previewFile: file,
+    initialVaultPath: vault ? decodeURIComponent(vault) : null,
   };
 }
 
@@ -534,7 +537,7 @@ function UpdateToast({
 }
 
 function App() {
-  const { isPreview, previewFile } = useMemo(getWindowMode, []);
+  const { isPreview, previewFile, initialVaultPath } = useMemo(getWindowMode, []);
 
   // Cmd/Ctrl+W — close window (works in both preview and folder mode)
   useEffect(() => {
@@ -580,7 +583,7 @@ function App() {
     <ThemeProvider>
       <Toaster />
       <TooltipProvider>
-        <NotesProvider>
+        <NotesProvider initialVaultPath={initialVaultPath}>
           <GitProvider>
             <AppContent />
           </GitProvider>
