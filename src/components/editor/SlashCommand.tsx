@@ -23,6 +23,7 @@ import {
   BracketsIcon,
   WorkflowIcon,
   MarkdownIcon,
+  PenToolIcon,
 } from "../icons";
 import { SlashCommandList, type SlashCommandListRef } from "./SlashCommandList";
 import { insertObsidianFrontmatter } from "./frontmatterUtils";
@@ -133,6 +134,15 @@ const SLASH_COMMANDS: SlashCommandItem[] = [
     aliases: ["mermaid", "diagram", "flowchart", "chart"],
     command: (editor) => {
       editor.chain().focus().setCodeBlock({ language: "mermaid" }).run();
+    },
+  },
+  {
+    title: "Excalidraw",
+    description: "Freehand drawing canvas",
+    icon: <PenToolIcon />,
+    aliases: ["draw", "sketch", "whiteboard", "canvas", "freehand"],
+    command: (editor) => {
+      editor.chain().focus().setCodeBlock({ language: "excalidraw" }).run();
     },
   },
   {

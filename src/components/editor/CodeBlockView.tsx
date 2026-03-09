@@ -3,15 +3,19 @@ import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { ReactNodeViewProps } from "@tiptap/react";
 import { SUPPORTED_LANGUAGES } from "./lowlight";
 import { MermaidRenderer } from "./MermaidRenderer";
+import { ExcalidrawView } from "./ExcalidrawView";
 import { ChevronDownIcon, PencilIcon, EyeIcon } from "../icons";
 
 const btnClass =
   "code-block-mermaid-btn inline-flex items-center gap-1 text-xs h-6 px-1.5 text-text-muted rounded cursor-pointer transition-colors hover:text-text hover:bg-bg-emphasis";
 
-export function CodeBlockView({ node, updateAttributes }: ReactNodeViewProps) {
+export function CodeBlockView({ node, updateAttributes, editor, getPos }: ReactNodeViewProps) {
   const language: string = node.attrs.language || "";
   const isMermaid = language === "mermaid";
-  const [showSource, setShowSource] = useState(!node.textContent.trim());
+  const isExcalidraw = language === "excalidraw";
+  const [showSource, setShowSource] = useState(
+    isExcalidraw ? false : !node.textContent.trim(),
+  );
   const codeContent = node.textContent;
 
   const handleLanguageChange = useCallback(
@@ -59,6 +63,34 @@ export function CodeBlockView({ node, updateAttributes }: ReactNodeViewProps) {
       </div>
     </div>
   );
+
+  if (isExcalidraw && !showSource) {
+    return (
+      <NodeViewWrapper className="code-block-wrapper excalidraw-wrapper" as="div">
+        <ExcalidrawView
+          content={codeContent}
+          editor={editor}
+          getPos={getPos}
+          nodeSize={node.nodeSize}
+        />
+        {/* Hidden but present for TipTap content tracking */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            overflow: "hidden",
+            height: 0,
+            opacity: 0,
+          }}
+        >
+          <pre>
+            {/* @ts-expect-error - "code" is a valid intrinsic element for NodeViewContent */}
+            <NodeViewContent as="code" />
+          </pre>
+        </div>
+      </NodeViewWrapper>
+    );
+  }
 
   if (isMermaid && !showSource) {
     return (
