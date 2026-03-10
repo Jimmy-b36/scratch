@@ -10,6 +10,7 @@ import {
   SearchOffIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  FolderPlusIcon,
 } from "../icons";
 import { mod, shift, isMac } from "../../lib/platform";
 
@@ -28,10 +29,11 @@ export function Sidebar({
   toggleAllFoldersSignal = 0,
   onToggleAllFolders,
 }: SidebarProps) {
-  const { notes, searchQuery } = useNotesData();
+  const { searchQuery } = useNotesData();
   const { createNote, search, clearSearch } = useNotesActions();
   const [searchOpen, setSearchOpen] = useState(false);
   const [allFoldersExpanded, setAllFoldersExpanded] = useState(false);
+  const [createRootFolderSignal, setCreateRootFolderSignal] = useState(0);
   const [inputValue, setInputValue] = useState(searchQuery);
   const debounceRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -108,17 +110,16 @@ export function Sidebar({
     clearSearch();
   }, [clearSearch]);
 
+  const handleCreateRootFolder = useCallback(() => {
+    setCreateRootFolderSignal((prev) => prev + 1);
+  }, []);
+
   return (
     <div className="w-64 h-full bg-bg-secondary border-r border-border flex flex-col select-none">
       {/* Drag region */}
       <div className="h-11 shrink-0" data-tauri-drag-region></div>
       <div className="flex items-center justify-between pl-4 pr-3 pb-2 border-b border-border shrink-0">
-        <div className="flex items-center gap-1">
-          <div className="font-medium text-base">Notes</div>
-          <div className="text-text-muted font-medium text-2xs min-w-4.75 h-4.75 flex items-center justify-center px-1 bg-bg-muted rounded-sm mt-0.5 pt-px">
-            {notes.length}
-          </div>
-        </div>
+        <div className="font-medium text-base">Notes</div>
         <div className="flex items-center gap-px">
           <IconButton
             onClick={onToggleAllFolders}
@@ -155,6 +156,13 @@ export function Sidebar({
           >
             <PlusIcon className="w-5.25 h-5.25 stroke-[1.4]" />
           </IconButton>
+          <IconButton
+            variant="ghost"
+            onClick={handleCreateRootFolder}
+            title="New Folder"
+          >
+            <FolderPlusIcon className="w-5 h-5 stroke-[1.6]" />
+          </IconButton>
         </div>
       </div>
       {/* Scrollable area with search and notes */}
@@ -190,6 +198,7 @@ export function Sidebar({
           focusSignal={focusNoteListSignal}
           toggleAllFoldersSignal={toggleAllFoldersSignal}
           onFolderTreeStateChange={setAllFoldersExpanded}
+          createRootFolderSignal={createRootFolderSignal}
         />
       </div>
 

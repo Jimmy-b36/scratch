@@ -9,9 +9,11 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
+import { toast } from "sonner";
 import { useNotesData, useNotesActions } from "../../context/NotesContext";
 import {
   ListItem,
+  Input,
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -131,7 +133,7 @@ interface FolderTreeNode {
   notes: DisplayItem[];
 }
 
-function buildFolderTree(items: DisplayItem[]): FolderTreeNode {
+function buildFolderTree(items: DisplayItem[], folderPaths: string[]): FolderTreeNode {
   const root: FolderTreeNode = {
     name: "",
     path: "",
@@ -139,17 +141,13 @@ function buildFolderTree(items: DisplayItem[]): FolderTreeNode {
     notes: [],
   };
 
-  for (const item of items) {
-    const parts = item.id.split("/");
-    if (parts.length === 1) {
-      root.notes.push(item);
-      continue;
-    }
-
+  const ensureFolder = (folderPath: string) => {
+    if (!folderPath) return;
+    const parts = folderPath.split("/").filter(Boolean);
     let current = root;
     let currentPath = "";
-    for (let i = 0; i < parts.length - 1; i += 1) {
-      const name = parts[i];
+
+    for (const name of parts) {
       currentPath = currentPath ? `${currentPath}/${name}` : name;
       let child = current.children.get(name);
       if (!child) {
@@ -163,6 +161,29 @@ function buildFolderTree(items: DisplayItem[]): FolderTreeNode {
       }
       current = child;
     }
+  };
+
+  for (const folderPath of folderPaths) {
+    ensureFolder(folderPath);
+  }
+
+  for (const item of items) {
+    const parts = item.id.split("/");
+    if (parts.length === 1) {
+      root.notes.push(item);
+      continue;
+    }
+
+    const folderPath = parts.slice(0, -1).join("/");
+    ensureFolder(folderPath);
+
+    let current = root;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const name = parts[i];
+      const child = current.children.get(name);
+      if (!child) break;
+      current = child;
+    }
 
     current.notes.push(item);
   }
@@ -174,15 +195,18 @@ interface NoteListProps {
   focusSignal?: number;
   toggleAllFoldersSignal?: number;
   onFolderTreeStateChange?: (allExpanded: boolean) => void;
+  createRootFolderSignal?: number;
 }
 
 export function NoteList({
   focusSignal = 0,
   toggleAllFoldersSignal = 0,
   onFolderTreeStateChange,
+  createRootFolderSignal = 0,
 }: NoteListProps) {
   const {
     notes,
+    folders,
     notesFolder,
     pinnedNoteIds,
     selectedNoteId,
@@ -190,14 +214,27 @@ export function NoteList({
     searchQuery,
     searchResults,
   } = useNotesData();
-  const { selectNote, deleteNote, duplicateNote, togglePinNote } =
+  const {
+    selectNote,
+    deleteNote,
+    duplicateNote,
+    togglePinNote,
+    createFolder,
+    createNoteInFolder,
+  } =
     useNotesActions();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
+  const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
+  const [createFolderName, setCreateFolderName] = useState("");
+  const [createFolderParentPath, setCreateFolderParentPath] = useState<string | null>(null);
+  const [createFolderError, setCreateFolderError] = useState<string | null>(null);
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
   const lastHandledToggleSignalRef = useRef(0);
+  const lastHandledCreateRootSignalRef = useRef(0);
 
   // Calculate pinned IDs set for efficient lookup
   const pinnedIds = useMemo(
@@ -267,14 +304,96 @@ export function NoteList({
     [pinnedIds, togglePinNote, duplicateNote, notesFolder]
   );
 
+  const openCreateFolderDialog = useCallback((parentPath: string | null) => {
+    setCreateFolderParentPath(parentPath);
+    setCreateFolderName("");
+    setCreateFolderError(null);
+    setCreateFolderDialogOpen(true);
+  }, []);
+
+  const handleCreateFolderConfirm = useCallback(async () => {
+    const trimmed = createFolderName.trim();
+    if (!trimmed) {
+      setCreateFolderError("Folder name is required");
+      return;
+    }
+
+    try {
+      setIsCreatingFolder(true);
+      setCreateFolderError(null);
+      await createFolder(createFolderParentPath, trimmed);
+
+      const createdPath = createFolderParentPath
+        ? `${createFolderParentPath}/${trimmed}`
+        : trimmed;
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        if (createFolderParentPath) {
+          next.add(createFolderParentPath);
+        }
+        next.add(createdPath);
+        return next;
+      });
+
+      setCreateFolderDialogOpen(false);
+      setCreateFolderName("");
+      setCreateFolderParentPath(null);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to create folder";
+      setCreateFolderError(message);
+      toast.error(message);
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  }, [createFolder, createFolderName, createFolderParentPath]);
+
+  const handleFolderContextMenu = useCallback(
+    async (e: React.MouseEvent, folderPath: string) => {
+      e.preventDefault();
+
+      const menu = await Menu.new({
+        items: [
+          await MenuItem.new({
+            text: "New Note Here",
+            action: async () => {
+              try {
+                await createNoteInFolder(folderPath);
+                setExpandedFolders((prev) => {
+                  const next = new Set(prev);
+                  next.add(folderPath);
+                  return next;
+                });
+              } catch (error) {
+                const message =
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to create note in folder";
+                toast.error(message);
+              }
+            },
+          }),
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await MenuItem.new({
+            text: "New Folder Here",
+            action: () => openCreateFolderDialog(folderPath),
+          }),
+        ],
+      });
+
+      await menu.popup();
+    },
+    [createNoteInFolder, openCreateFolderDialog]
+  );
+
   const displayItems = useMemo(
     () => getDisplayItems(notes, searchQuery, searchResults),
     [notes, searchQuery, searchResults],
   );
 
   const folderTree = useMemo(
-    () => buildFolderTree(displayItems),
-    [displayItems]
+    () => buildFolderTree(displayItems, folders),
+    [displayItems, folders]
   );
 
   const allFolderPaths = useMemo(() => {
@@ -356,29 +475,16 @@ export function NoteList({
     toggleAllFolders();
   }, [toggleAllFoldersSignal, toggleAllFolders]);
 
-  if (isLoading && notes.length === 0) {
-    return (
-      <div className="p-4 text-center text-text-muted select-none">
-        Loading...
-      </div>
-    );
-  }
-
-  if (searchQuery.trim() && displayItems.length === 0) {
-    return (
-      <div className="p-4 text-center text-sm text-text-muted select-none">
-        No results found
-      </div>
-    );
-  }
-
-  if (displayItems.length === 0) {
-    return (
-      <div className="p-4 text-center text-sm text-text-muted select-none">
-        No notes yet
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (
+      createRootFolderSignal === 0 ||
+      createRootFolderSignal === lastHandledCreateRootSignalRef.current
+    ) {
+      return;
+    }
+    lastHandledCreateRootSignalRef.current = createRootFolderSignal;
+    openCreateFolderDialog(null);
+  }, [createRootFolderSignal, openCreateFolderDialog]);
 
   const renderFolderTree = (node: FolderTreeNode, depth: number): ReactNode[] => {
     const rows: ReactNode[] = [];
@@ -393,6 +499,7 @@ export function NoteList({
         <button
           key={`folder-${folder.path}`}
           onClick={() => toggleFolder(folder.path)}
+          onContextMenu={(e) => handleFolderContextMenu(e, folder.path)}
           className="w-full flex items-center gap-1.5 py-1.5 pr-2 rounded-md hover:bg-bg-muted text-text-muted hover:text-text transition-colors"
           style={{ paddingLeft: `${8 + depth * 14}px` }}
         >
@@ -435,8 +542,19 @@ export function NoteList({
     return rows;
   };
 
-  return (
-    <>
+  let content: ReactNode;
+  if (isLoading && notes.length === 0) {
+    content = <div className="p-4 text-center text-text-muted select-none">Loading...</div>;
+  } else if (searchQuery.trim() && displayItems.length === 0) {
+    content = (
+      <div className="p-4 text-center text-sm text-text-muted select-none">
+        No results found
+      </div>
+    );
+  } else if (displayItems.length === 0 && folders.length === 0) {
+    content = <div className="p-4 text-center text-sm text-text-muted select-none">No notes yet</div>;
+  } else {
+    content = (
       <div
         ref={containerRef}
         tabIndex={0}
@@ -458,6 +576,12 @@ export function NoteList({
             ))
           : renderFolderTree(folderTree, 0)}
       </div>
+    );
+  }
+
+  return (
+    <>
+      {content}
 
       {/* Delete confirmation dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -473,6 +597,64 @@ export function NoteList({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteConfirm}>
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={createFolderDialogOpen}
+        onOpenChange={(open) => {
+          setCreateFolderDialogOpen(open);
+          if (!open) {
+            setCreateFolderError(null);
+            setCreateFolderName("");
+            setCreateFolderParentPath(null);
+            setIsCreatingFolder(false);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>New folder</AlertDialogTitle>
+            <AlertDialogDescription>
+              {createFolderParentPath
+                ? `Create a folder inside ${createFolderParentPath}`
+                : "Create a folder at the root of your notes"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Input
+              value={createFolderName}
+              onChange={(e) => {
+                setCreateFolderName(e.target.value);
+                if (createFolderError) {
+                  setCreateFolderError(null);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleCreateFolderConfirm();
+                }
+              }}
+              placeholder="Folder name"
+              autoFocus
+            />
+            {createFolderError && (
+              <p className="text-xs text-red-500">{createFolderError}</p>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCreatingFolder}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleCreateFolderConfirm();
+              }}
+              disabled={isCreatingFolder}
+            >
+              {isCreatingFolder ? "Creating..." : "Create"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -847,6 +847,104 @@ fn abs_path_from_id(notes_root: &Path, id: &str) -> Result<PathBuf, String> {
     Ok(file_path)
 }
 
+fn normalize_folder_rel_path(path: &str, field_name: &str) -> Result<Vec<String>, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    if trimmed.contains('\\') {
+        return Err(format!("Invalid {}: backslashes not allowed", field_name));
+    }
+
+    let rel = Path::new(trimmed);
+    let mut parts = Vec::new();
+
+    for component in rel.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(format!(
+                    "Invalid {}: parent directory references not allowed",
+                    field_name
+                ));
+            }
+            std::path::Component::CurDir => {
+                return Err(format!(
+                    "Invalid {}: current directory references not allowed",
+                    field_name
+                ));
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(format!("Invalid {}: absolute paths not allowed", field_name));
+            }
+            std::path::Component::Normal(name) => {
+                let name_str = name
+                    .to_str()
+                    .ok_or_else(|| format!("Invalid {}: path contains invalid UTF-8", field_name))?;
+                if EXCLUDED_DIRS.contains(&name_str) {
+                    return Err(format!("Invalid {}: reserved directory '{}'", field_name, name_str));
+                }
+                parts.push(name_str.to_string());
+            }
+        }
+    }
+
+    Ok(parts)
+}
+
+fn create_folder_impl(
+    notes_root: &Path,
+    parent_path: Option<&str>,
+    name: &str,
+) -> Result<String, String> {
+    let folder_name = name.trim();
+    if folder_name.is_empty() {
+        return Err("Folder name cannot be empty".to_string());
+    }
+    if folder_name.contains('/') || folder_name.contains('\\') {
+        return Err("Folder name cannot contain path separators".to_string());
+    }
+    if folder_name == "." || folder_name == ".." {
+        return Err("Folder name cannot be '.' or '..'".to_string());
+    }
+    if EXCLUDED_DIRS.contains(&folder_name) {
+        return Err(format!("Folder name '{}' is reserved", folder_name));
+    }
+
+    let parent_parts = normalize_folder_rel_path(parent_path.unwrap_or(""), "parent path")?;
+    let name_parts = normalize_folder_rel_path(folder_name, "folder name")?;
+    let mut rel_parts = parent_parts;
+    rel_parts.extend(name_parts);
+
+    let mut parent_abs = notes_root.to_path_buf();
+    if let Some(parent) = parent_path {
+        let parent_trimmed = parent.trim();
+        if !parent_trimmed.is_empty() {
+            parent_abs = notes_root.join(parent_trimmed);
+            if !parent_abs.starts_with(notes_root) {
+                return Err("Invalid parent path: path escapes notes folder".to_string());
+            }
+            if !parent_abs.exists() {
+                return Err("Parent folder does not exist".to_string());
+            }
+            if !parent_abs.is_dir() {
+                return Err("Parent path is not a directory".to_string());
+            }
+        }
+    }
+
+    let target = parent_abs.join(folder_name);
+    if !target.starts_with(notes_root) {
+        return Err("Invalid folder path: path escapes notes folder".to_string());
+    }
+    if target.exists() {
+        return Err("A file or folder with that name already exists".to_string());
+    }
+
+    std::fs::create_dir(&target).map_err(|e| e.to_string())?;
+
+    Ok(rel_parts.join("/"))
+}
+
 // Get app config file path (in app data directory)
 fn get_app_config_path(app: &AppHandle) -> Result<PathBuf> {
     let app_data = app.path().app_data_dir()?;
@@ -1059,6 +1157,52 @@ fn set_notes_folder(
 ) -> Result<(), String> {
     activate_vault_path(&app, state.inner(), &path, Some(window.label()))?;
     Ok(())
+}
+
+#[tauri::command]
+fn list_folders(window: tauri::Window, state: State<AppState>) -> Result<Vec<String>, String> {
+    let folder = require_notes_folder_for_window(state.inner(), Some(window.label()))?;
+    let root = PathBuf::from(&folder);
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut folders = Vec::new();
+    for entry in walkdir::WalkDir::new(&root)
+        .min_depth(1)
+        .max_depth(10)
+        .into_iter()
+        .filter_entry(is_visible_notes_entry)
+        .flatten()
+    {
+        if !entry.file_type().is_dir() {
+            continue;
+        }
+
+        if let Ok(rel) = entry.path().strip_prefix(&root) {
+            if let Some(rel_str) = rel.to_str() {
+                let normalized = rel_str.replace(std::path::MAIN_SEPARATOR, "/");
+                if !normalized.is_empty() {
+                    folders.push(normalized);
+                }
+            }
+        }
+    }
+
+    folders.sort();
+    Ok(folders)
+}
+
+#[tauri::command]
+fn create_folder(
+    window: tauri::Window,
+    parent_path: Option<String>,
+    name: String,
+    state: State<AppState>,
+) -> Result<String, String> {
+    let folder = require_notes_folder_for_window(state.inner(), Some(window.label()))?;
+    let root = PathBuf::from(&folder);
+    create_folder_impl(&root, parent_path.as_deref(), &name)
 }
 
 #[tauri::command]
@@ -1480,8 +1624,27 @@ async fn delete_note(
 
 #[tauri::command]
 async fn create_note(window: tauri::Window, state: State<'_, AppState>) -> Result<Note, String> {
+    create_note_for_parent(&window, &state, None).await
+}
+
+async fn create_note_for_parent(
+    window: &tauri::Window,
+    state: &State<'_, AppState>,
+    parent_path: Option<&str>,
+) -> Result<Note, String> {
     let folder = require_notes_folder_for_window(state.inner(), Some(window.label()))?;
     let folder_path = PathBuf::from(&folder);
+    let parent_rel = parent_path.unwrap_or("").trim();
+    if !parent_rel.is_empty() {
+        let _ = normalize_folder_rel_path(parent_rel, "parent path")?;
+        let parent_abs = folder_path.join(parent_rel);
+        if !parent_abs.exists() {
+            return Err("Parent folder does not exist".to_string());
+        }
+        if !parent_abs.is_dir() {
+            return Err("Parent path is not a directory".to_string());
+        }
+    }
 
     // Get template from settings (default "Untitled")
     let template = load_settings(&folder)
@@ -1502,8 +1665,13 @@ async fn create_note(window: tauri::Window, state: State<'_, AppState>) -> Resul
         sanitized.clone()
     };
 
-    let mut final_id = base_id.clone();
+    let mut current_id = base_id.clone();
     let mut counter = if has_counter { 2 } else { 1 };
+    let mut final_id = if parent_rel.is_empty() {
+        current_id.clone()
+    } else {
+        format!("{}/{}", parent_rel, current_id)
+    };
 
     // Ensure filename uniqueness
     while abs_path_from_id(&folder_path, &final_id)
@@ -1511,10 +1679,15 @@ async fn create_note(window: tauri::Window, state: State<'_, AppState>) -> Resul
         .unwrap_or(false)
     {
         if has_counter {
-            final_id = sanitized.replace("{counter}", &counter.to_string());
+            current_id = sanitized.replace("{counter}", &counter.to_string());
         } else {
-            final_id = format!("{}-{}", base_id, counter);
+            current_id = format!("{}-{}", base_id, counter);
         }
+        final_id = if parent_rel.is_empty() {
+            current_id.clone()
+        } else {
+            format!("{}/{}", parent_rel, current_id)
+        };
         counter += 1;
     }
 
@@ -1555,6 +1728,15 @@ async fn create_note(window: tauri::Window, state: State<'_, AppState>) -> Resul
         path: file_path.to_string_lossy().into_owned(),
         modified,
     })
+}
+
+#[tauri::command]
+async fn create_note_in_folder(
+    window: tauri::Window,
+    parent_path: String,
+    state: State<'_, AppState>,
+) -> Result<Note, String> {
+    create_note_for_parent(&window, &state, Some(&parent_path)).await
 }
 
 #[tauri::command]
@@ -3385,6 +3567,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_notes_folder,
             set_notes_folder,
+            list_folders,
             list_vaults,
             list_recent_vaults,
             add_vault,
@@ -3397,6 +3580,8 @@ pub fn run() {
             save_note,
             delete_note,
             create_note,
+            create_note_in_folder,
+            create_folder,
             get_settings,
             update_settings,
             preview_note_name,
@@ -3450,4 +3635,75 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            let unique = format!(
+                "{}-{}-{}",
+                prefix,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("time")
+                    .as_nanos()
+            );
+            let path = std::env::temp_dir().join(unique);
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn create_folder_impl_creates_root_folder() {
+        let dir = TempDirGuard::new("scratch-create-folder-root");
+        let rel = create_folder_impl(&dir.path, None, "Projects").expect("create root folder");
+        assert_eq!(rel, "Projects");
+        assert!(dir.path.join("Projects").is_dir());
+    }
+
+    #[test]
+    fn create_folder_impl_creates_nested_folder() {
+        let dir = TempDirGuard::new("scratch-create-folder-nested");
+        std::fs::create_dir_all(dir.path.join("Work")).expect("create parent folder");
+
+        let rel = create_folder_impl(&dir.path, Some("Work"), "Q1").expect("create nested folder");
+        assert_eq!(rel, "Work/Q1");
+        assert!(dir.path.join("Work").join("Q1").is_dir());
+    }
+
+    #[test]
+    fn create_folder_impl_rejects_invalid_and_reserved_paths() {
+        let dir = TempDirGuard::new("scratch-create-folder-invalid");
+        std::fs::create_dir_all(dir.path.join("Parent")).expect("create parent");
+
+        assert!(create_folder_impl(&dir.path, Some("../escape"), "Child").is_err());
+        assert!(create_folder_impl(&dir.path, Some("/absolute"), "Child").is_err());
+        assert!(create_folder_impl(&dir.path, Some("assets"), "Child").is_err());
+        assert!(create_folder_impl(&dir.path, Some("Parent"), ".scratch").is_err());
+        assert!(create_folder_impl(&dir.path, Some("Parent"), "").is_err());
+    }
+
+    #[test]
+    fn create_folder_impl_rejects_collisions() {
+        let dir = TempDirGuard::new("scratch-create-folder-collision");
+        std::fs::create_dir_all(dir.path.join("Docs")).expect("create existing folder");
+
+        let result = create_folder_impl(&dir.path, None, "Docs");
+        assert!(result.is_err());
+    }
 }
