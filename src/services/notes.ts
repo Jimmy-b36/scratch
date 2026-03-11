@@ -41,6 +41,10 @@ export async function listNotes(): Promise<NoteMetadata[]> {
   return invoke("list_notes");
 }
 
+export async function listFolders(): Promise<string[]> {
+  return invoke("list_folders");
+}
+
 export async function readNote(id: string): Promise<Note> {
   return invoke("read_note", { id });
 }
@@ -55,6 +59,17 @@ export async function deleteNote(id: string): Promise<void> {
 
 export async function createNote(): Promise<Note> {
   return invoke("create_note");
+}
+
+export async function createNoteInFolder(parentPath: string): Promise<Note> {
+  return invoke("create_note_in_folder", { parentPath });
+}
+
+export async function createFolder(
+  parentPath: string | null,
+  name: string
+): Promise<string> {
+  return invoke("create_folder", { parentPath, name });
 }
 
 export async function duplicateNote(id: string): Promise<Note> {

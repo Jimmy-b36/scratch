@@ -23,6 +23,7 @@ import {
 // Data context: changes frequently, only subscribed by components that need the data
 interface NotesDataContextValue {
   notes: NoteMetadata[];
+  folders: string[];
   pinnedNoteIds: string[];
   selectedNoteId: string | null;
   currentNote: Note | null;
@@ -43,6 +44,8 @@ interface NotesDataContextValue {
 interface NotesActionsContextValue {
   selectNote: (id: string) => Promise<void>;
   createNote: () => Promise<void>;
+  createNoteInFolder: (parentPath: string) => Promise<void>;
+  createFolder: (parentPath: string | null, name: string) => Promise<void>;
   saveNote: (content: string, noteId?: string) => Promise<void>;
   deleteNote: (id: string) => Promise<void>;
   duplicateNote: (id: string) => Promise<void>;
@@ -73,6 +76,7 @@ export function NotesProvider({
   initialVaultPath?: string | null;
 }) {
   const [notes, setNotes] = useState<NoteMetadata[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [pinnedNoteIds, setPinnedNoteIds] = useState<string[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
@@ -133,6 +137,19 @@ export function NotesProvider({
     }
   }, []);
 
+  const refreshFolders = useCallback(async () => {
+    if (!notesFolder) {
+      setFolders([]);
+      return;
+    }
+    try {
+      const folderList = await notesService.listFolders();
+      setFolders(folderList);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load folders");
+    }
+  }, [notesFolder]);
+
   // Debounced refresh - coalesces rapid saves into a single refresh
   const scheduleRefresh = useCallback(() => {
     if (refreshTimeoutRef.current) {
@@ -186,6 +203,39 @@ export function NotesProvider({
       setError(err instanceof Error ? err.message : "Failed to create note");
     }
   }, [refreshNotes]);
+
+  const createNoteInFolder = useCallback(async (parentPath: string) => {
+    try {
+      const note = await notesService.createNoteInFolder(parentPath);
+      recentlySavedRef.current.add(note.id);
+      await refreshNotes();
+      setCurrentNote(note);
+      setSelectedNoteId(note.id);
+      setSearchQuery("");
+      setSearchResults([]);
+      setTimeout(() => {
+        recentlySavedRef.current.delete(note.id);
+      }, 1000);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to create note in folder"
+      );
+      throw err;
+    }
+  }, [refreshNotes]);
+
+  const createFolder = useCallback(
+    async (parentPath: string | null, name: string) => {
+      try {
+        await notesService.createFolder(parentPath, name);
+        await Promise.all([refreshNotes(), refreshFolders()]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to create folder");
+        throw err;
+      }
+    },
+    [refreshNotes, refreshFolders]
+  );
 
   const saveNote = useCallback(
     async (content: string, noteId?: string) => {
@@ -381,12 +431,13 @@ export function NotesProvider({
       // Start file watcher after setting folder
       await notesService.startFileWatcher();
       await refreshNotes();
+      await refreshFolders();
       await refreshVaults();
       await refreshPinnedNoteIds();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to switch vault");
     }
-  }, [refreshNotes, refreshVaults, refreshPinnedNoteIds]);
+  }, [refreshNotes, refreshFolders, refreshVaults, refreshPinnedNoteIds]);
 
   const setNotesFolder = useCallback(async (path: string) => {
     try {
@@ -395,12 +446,13 @@ export function NotesProvider({
       setNotesFolderState(activePath);
       await notesService.startFileWatcher();
       await refreshNotes();
+      await refreshFolders();
       await refreshVaults();
       await refreshPinnedNoteIds();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to set notes folder");
     }
-  }, [refreshNotes, refreshVaults, refreshPinnedNoteIds]);
+  }, [refreshNotes, refreshFolders, refreshVaults, refreshPinnedNoteIds]);
 
   const addVault = useCallback(async (path: string) => {
     try {
@@ -519,7 +571,9 @@ export function NotesProvider({
         await refreshVaults();
         if (resolvedFolder) {
           const notesList = await notesService.listNotes();
+          const folderList = await notesService.listFolders();
           setNotes(notesList);
+          setFolders(folderList);
           await refreshPinnedNoteIds();
           // Start file watcher
           await notesService.startFileWatcher();
@@ -592,13 +646,15 @@ export function NotesProvider({
   useEffect(() => {
     if (notesFolder) {
       refreshNotes();
+      refreshFolders();
     }
-  }, [notesFolder, refreshNotes]);
+  }, [notesFolder, refreshNotes, refreshFolders]);
 
   // Memoize data context value to prevent unnecessary re-renders
   const dataValue = useMemo<NotesDataContextValue>(
     () => ({
       notes,
+      folders,
       pinnedNoteIds,
       selectedNoteId,
       currentNote,
@@ -616,6 +672,7 @@ export function NotesProvider({
     }),
     [
       notes,
+      folders,
       pinnedNoteIds,
       selectedNoteId,
       currentNote,
@@ -637,6 +694,8 @@ export function NotesProvider({
     () => ({
       selectNote,
       createNote,
+      createNoteInFolder,
+      createFolder,
       saveNote,
       deleteNote,
       duplicateNote,
@@ -658,6 +717,8 @@ export function NotesProvider({
     [
       selectNote,
       createNote,
+      createNoteInFolder,
+      createFolder,
       saveNote,
       deleteNote,
       duplicateNote,
