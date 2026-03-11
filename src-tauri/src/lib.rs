@@ -945,6 +945,33 @@ fn create_folder_impl(
     Ok(rel_parts.join("/"))
 }
 
+fn delete_folder_impl(notes_root: &Path, path: &str) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Folder path cannot be empty".to_string());
+    }
+
+    let rel_parts = normalize_folder_rel_path(trimmed, "folder path")?;
+    if rel_parts.is_empty() {
+        return Err("Folder path cannot be empty".to_string());
+    }
+    let rel = rel_parts.join("/");
+    let target = notes_root.join(&rel);
+
+    if !target.starts_with(notes_root) {
+        return Err("Invalid folder path: path escapes notes folder".to_string());
+    }
+    if !target.exists() {
+        return Err("Folder does not exist".to_string());
+    }
+    if !target.is_dir() {
+        return Err("Path is not a folder".to_string());
+    }
+
+    std::fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+    Ok(rel)
+}
+
 // Get app config file path (in app data directory)
 fn get_app_config_path(app: &AppHandle) -> Result<PathBuf> {
     let app_data = app.path().app_data_dir()?;
@@ -1203,6 +1230,36 @@ fn create_folder(
     let folder = require_notes_folder_for_window(state.inner(), Some(window.label()))?;
     let root = PathBuf::from(&folder);
     create_folder_impl(&root, parent_path.as_deref(), &name)
+}
+
+#[tauri::command]
+fn delete_folder(
+    window: tauri::Window,
+    path: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let folder = require_notes_folder_for_window(state.inner(), Some(window.label()))?;
+    let root = PathBuf::from(&folder);
+    let deleted_rel = delete_folder_impl(&root, &path)?;
+
+    // Rebuild search index to remove deleted notes/folders.
+    {
+        let indexes = state.search_index.lock().expect("search index mutex");
+        if let Some(search_index) = indexes.get(window.label()) {
+            let _ = search_index.rebuild_index(&root);
+        }
+    }
+
+    // Prune deleted notes from in-memory cache for this window.
+    {
+        let mut cache = state.notes_cache.write().expect("cache write lock");
+        if let Some(per_window) = cache.get_mut(window.label()) {
+            let prefix = format!("{}/", deleted_rel);
+            per_window.retain(|id, _| id != &deleted_rel && !id.starts_with(&prefix));
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -3582,6 +3639,7 @@ pub fn run() {
             create_note,
             create_note_in_folder,
             create_folder,
+            delete_folder,
             get_settings,
             update_settings,
             preview_note_name,
@@ -3705,5 +3763,32 @@ mod tests {
 
         let result = create_folder_impl(&dir.path, None, "Docs");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn delete_folder_impl_removes_nested_folder() {
+        let dir = TempDirGuard::new("scratch-delete-folder-nested");
+        std::fs::create_dir_all(dir.path.join("Projects").join("Q1")).expect("create folder tree");
+        std::fs::write(
+            dir.path.join("Projects").join("Q1").join("note.md"),
+            "# Note",
+        )
+        .expect("write note");
+
+        let rel = delete_folder_impl(&dir.path, "Projects").expect("delete folder");
+        assert_eq!(rel, "Projects");
+        assert!(!dir.path.join("Projects").exists());
+    }
+
+    #[test]
+    fn delete_folder_impl_rejects_invalid_paths() {
+        let dir = TempDirGuard::new("scratch-delete-folder-invalid");
+        std::fs::create_dir_all(dir.path.join("Parent")).expect("create parent");
+
+        assert!(delete_folder_impl(&dir.path, "").is_err());
+        assert!(delete_folder_impl(&dir.path, "../escape").is_err());
+        assert!(delete_folder_impl(&dir.path, "/absolute").is_err());
+        assert!(delete_folder_impl(&dir.path, ".scratch").is_err());
+        assert!(delete_folder_impl(&dir.path, "Missing").is_err());
     }
 }

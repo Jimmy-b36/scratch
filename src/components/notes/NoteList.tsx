@@ -221,11 +221,14 @@ export function NoteList({
     togglePinNote,
     createFolder,
     createNoteInFolder,
+    deleteFolder,
   } =
     useNotesActions();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
+  const [deleteFolderDialogOpen, setDeleteFolderDialogOpen] = useState(false);
+  const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
   const [createFolderName, setCreateFolderName] = useState("");
   const [createFolderParentPath, setCreateFolderParentPath] = useState<string | null>(null);
@@ -253,6 +256,24 @@ export function NoteList({
       }
     }
   }, [noteToDelete, deleteNote]);
+
+  const handleDeleteFolderConfirm = useCallback(async () => {
+    if (!folderToDelete) return;
+    try {
+      await deleteFolder(folderToDelete);
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        next.delete(folderToDelete);
+        return next;
+      });
+      setFolderToDelete(null);
+      setDeleteFolderDialogOpen(false);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete folder";
+      toast.error(message);
+    }
+  }, [deleteFolder, folderToDelete]);
 
   const handleContextMenu = useCallback(
     async (e: React.MouseEvent, noteId: string) => {
@@ -377,6 +398,14 @@ export function NoteList({
           await MenuItem.new({
             text: "New Folder Here",
             action: () => openCreateFolderDialog(folderPath),
+          }),
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await MenuItem.new({
+            text: "Delete Folder",
+            action: () => {
+              setFolderToDelete(folderPath);
+              setDeleteFolderDialogOpen(true);
+            },
           }),
         ],
       });
@@ -655,6 +684,33 @@ export function NoteList({
               disabled={isCreatingFolder}
             >
               {isCreatingFolder ? "Creating..." : "Create"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={deleteFolderDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteFolderDialogOpen(open);
+          if (!open) {
+            setFolderToDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete folder?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {folderToDelete
+                ? `This will permanently delete "${folderToDelete}" and all notes and subfolders inside it.`
+                : "This will permanently delete the folder and all contents."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteFolderConfirm}>
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
