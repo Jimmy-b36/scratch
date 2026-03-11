@@ -46,6 +46,7 @@ interface NotesActionsContextValue {
   createNote: () => Promise<void>;
   createNoteInFolder: (parentPath: string) => Promise<void>;
   createFolder: (parentPath: string | null, name: string) => Promise<void>;
+  deleteFolder: (path: string) => Promise<void>;
   saveNote: (content: string, noteId?: string) => Promise<void>;
   deleteNote: (id: string) => Promise<void>;
   duplicateNote: (id: string) => Promise<void>;
@@ -231,6 +232,28 @@ export function NotesProvider({
         await Promise.all([refreshNotes(), refreshFolders()]);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to create folder");
+        throw err;
+      }
+    },
+    [refreshNotes, refreshFolders]
+  );
+
+  const deleteFolder = useCallback(
+    async (path: string) => {
+      try {
+        await notesService.deleteFolder(path);
+        setSelectedNoteId((prevId) => {
+          if (!prevId) return prevId;
+          const isDeleted = prevId === path || prevId.startsWith(`${path}/`);
+          if (isDeleted) {
+            setCurrentNote(null);
+            return null;
+          }
+          return prevId;
+        });
+        await Promise.all([refreshNotes(), refreshFolders()]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete folder");
         throw err;
       }
     },
@@ -696,6 +719,7 @@ export function NotesProvider({
       createNote,
       createNoteInFolder,
       createFolder,
+      deleteFolder,
       saveNote,
       deleteNote,
       duplicateNote,
@@ -719,6 +743,7 @@ export function NotesProvider({
       createNote,
       createNoteInFolder,
       createFolder,
+      deleteFolder,
       saveNote,
       deleteNote,
       duplicateNote,

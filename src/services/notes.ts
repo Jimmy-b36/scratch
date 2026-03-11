@@ -72,6 +72,10 @@ export async function createFolder(
   return invoke("create_folder", { parentPath, name });
 }
 
+export async function deleteFolder(path: string): Promise<void> {
+  return invoke("delete_folder", { path });
+}
+
 export async function duplicateNote(id: string): Promise<Note> {
   // Read the original note, then create a new one with the same content
   const original = await readNote(id);
