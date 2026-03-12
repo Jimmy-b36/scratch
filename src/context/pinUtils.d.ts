@@ -6,4 +6,8 @@ export function transferPinnedId(
   fromId: string,
   toId: string,
 ): string[];
-
+export function remapPinnedIdsForFolderMove(
+  pinnedIds: string[],
+  fromPath: string,
+  toPath: string,
+): string[];

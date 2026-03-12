@@ -1,6 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Note, NoteMetadata, Settings, VaultInfo } from "../types/note";
 
+export interface MoveNoteResult {
+  fromId: string;
+  toId: string;
+}
+
+export interface MoveFolderResult {
+  fromPath: string;
+  toPath: string;
+}
+
 export async function getNotesFolder(): Promise<string | null> {
   return invoke("get_notes_folder");
 }
@@ -74,6 +84,20 @@ export async function createFolder(
 
 export async function deleteFolder(path: string): Promise<void> {
   return invoke("delete_folder", { path });
+}
+
+export async function moveNote(
+  id: string,
+  targetFolderPath: string | null
+): Promise<MoveNoteResult> {
+  return invoke("move_note", { id, targetFolderPath });
+}
+
+export async function moveFolder(
+  path: string,
+  targetParentPath: string | null
+): Promise<MoveFolderResult> {
+  return invoke("move_folder", { path, targetParentPath });
 }
 
 export async function duplicateNote(id: string): Promise<Note> {

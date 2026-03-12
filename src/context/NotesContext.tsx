@@ -14,6 +14,7 @@ import * as notesService from "../services/notes";
 import type { SearchResult } from "../services/notes";
 import {
   addPinnedId,
+  remapPinnedIdsForFolderMove,
   removePinnedId,
   togglePinnedId,
   transferPinnedId,
@@ -47,6 +48,8 @@ interface NotesActionsContextValue {
   createNoteInFolder: (parentPath: string) => Promise<void>;
   createFolder: (parentPath: string | null, name: string) => Promise<void>;
   deleteFolder: (path: string) => Promise<void>;
+  moveNote: (id: string, targetFolderPath: string | null) => Promise<void>;
+  moveFolder: (path: string, targetParentPath: string | null) => Promise<void>;
   saveNote: (content: string, noteId?: string) => Promise<void>;
   deleteNote: (id: string) => Promise<void>;
   duplicateNote: (id: string) => Promise<void>;
@@ -254,6 +257,102 @@ export function NotesProvider({
         await Promise.all([refreshNotes(), refreshFolders()]);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to delete folder");
+        throw err;
+      }
+    },
+    [refreshNotes, refreshFolders]
+  );
+
+  const moveNote = useCallback(
+    async (id: string, targetFolderPath: string | null) => {
+      try {
+        const moved = await notesService.moveNote(id, targetFolderPath);
+
+        if (moved.fromId !== moved.toId) {
+          const currentSettings = await notesService.getSettings();
+          const pinnedIds = currentSettings.pinnedNoteIds || [];
+          if (pinnedIds.includes(moved.fromId)) {
+            const nextPinnedIds = transferPinnedId(
+              pinnedIds,
+              moved.fromId,
+              moved.toId
+            );
+            const updatedSettings = {
+              ...currentSettings,
+              pinnedNoteIds: nextPinnedIds,
+            };
+            await notesService.updateSettings(updatedSettings);
+            setPinnedNoteIds(nextPinnedIds);
+          }
+
+          setSelectedNoteId((prevId) => {
+            if (prevId === moved.fromId) {
+              setCurrentNote((prevNote) =>
+                prevNote && prevNote.id === moved.fromId
+                  ? {
+                      ...prevNote,
+                      id: moved.toId,
+                    }
+                  : prevNote
+              );
+              return moved.toId;
+            }
+            return prevId;
+          });
+        }
+
+        await Promise.all([refreshNotes(), refreshFolders()]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to move note");
+        throw err;
+      }
+    },
+    [refreshNotes, refreshFolders]
+  );
+
+  const moveFolder = useCallback(
+    async (path: string, targetParentPath: string | null) => {
+      try {
+        const moved = await notesService.moveFolder(path, targetParentPath);
+
+        if (moved.fromPath !== moved.toPath) {
+          const currentSettings = await notesService.getSettings();
+          const pinnedIds = currentSettings.pinnedNoteIds || [];
+          const nextPinnedIds = remapPinnedIdsForFolderMove(
+            pinnedIds,
+            moved.fromPath,
+            moved.toPath
+          );
+          if (nextPinnedIds.join("\0") !== pinnedIds.join("\0")) {
+            const updatedSettings = {
+              ...currentSettings,
+              pinnedNoteIds: nextPinnedIds,
+            };
+            await notesService.updateSettings(updatedSettings);
+            setPinnedNoteIds(nextPinnedIds);
+          }
+
+          setSelectedNoteId((prevId) => {
+            if (!prevId) return prevId;
+            if (prevId.startsWith(`${moved.fromPath}/`)) {
+              const nextId = `${moved.toPath}/${prevId.slice(moved.fromPath.length + 1)}`;
+              setCurrentNote((prevNote) =>
+                prevNote && prevNote.id === prevId
+                  ? {
+                      ...prevNote,
+                      id: nextId,
+                    }
+                  : prevNote
+              );
+              return nextId;
+            }
+            return prevId;
+          });
+        }
+
+        await Promise.all([refreshNotes(), refreshFolders()]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to move folder");
         throw err;
       }
     },
@@ -720,6 +819,8 @@ export function NotesProvider({
       createNoteInFolder,
       createFolder,
       deleteFolder,
+      moveNote,
+      moveFolder,
       saveNote,
       deleteNote,
       duplicateNote,
@@ -744,6 +845,8 @@ export function NotesProvider({
       createNoteInFolder,
       createFolder,
       deleteFolder,
+      moveNote,
+      moveFolder,
       saveNote,
       deleteNote,
       duplicateNote,
