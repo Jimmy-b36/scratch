@@ -5,10 +5,25 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  pointerWithin,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import { useNotesData, useNotesActions } from "../../context/NotesContext";
 import {
@@ -82,6 +97,158 @@ interface NoteItemProps {
   onSelect: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   showFolderPrefix?: boolean;
+}
+
+interface DragDescriptor {
+  type: "note" | "folder";
+  id: string;
+  label: string;
+}
+
+function parseDragDescriptor(rawId: string): DragDescriptor | null {
+  if (rawId.startsWith("drag:note:")) {
+    const id = rawId.slice("drag:note:".length);
+    return { type: "note", id, label: id };
+  }
+  if (rawId.startsWith("drag:folder:")) {
+    const id = rawId.slice("drag:folder:".length);
+    const parts = id.split("/");
+    return { type: "folder", id, label: parts[parts.length - 1] || id };
+  }
+  return null;
+}
+
+function parseDropTargetFolder(rawId: string): string | undefined {
+  if (rawId.startsWith("drop:folder:")) {
+    return rawId.slice("drop:folder:".length);
+  }
+  return undefined;
+}
+
+function parentFolderPath(path: string): string | null {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? null : path.slice(0, idx);
+}
+
+function folderName(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? path : path.slice(idx + 1);
+}
+
+function DraggableNoteRow({
+  item,
+  depth,
+  selectedNoteId,
+  pinnedIds,
+  selectNote,
+  handleContextMenu,
+  dndEnabled,
+}: {
+  item: DisplayItem;
+  depth: number;
+  selectedNoteId: string | null;
+  pinnedIds: Set<string>;
+  selectNote: (id: string) => Promise<void>;
+  handleContextMenu: (e: React.MouseEvent, id: string) => void;
+  dndEnabled: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `drag:note:${item.id}`,
+    data: {
+      type: "note",
+      id: item.id,
+      label: cleanTitle(item.title),
+    } as DragDescriptor,
+    disabled: !dndEnabled,
+  });
+
+  const style: CSSProperties = {
+    paddingLeft: `${depth > 0 ? 8 + depth * 14 : 0}px`,
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.45 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...(dndEnabled ? attributes : {})} {...(dndEnabled ? listeners : {})}>
+      <NoteItem
+        id={item.id}
+        title={item.title}
+        preview={item.preview}
+        modified={item.modified}
+        isSelected={selectedNoteId === item.id}
+        isPinned={pinnedIds.has(item.id)}
+        onSelect={selectNote}
+        onContextMenu={handleContextMenu}
+        showFolderPrefix={false}
+      />
+    </div>
+  );
+}
+
+function FolderRow({
+  folder,
+  depth,
+  isExpanded,
+  isDropTarget,
+  onToggle,
+  onContextMenu,
+  dndEnabled,
+}: {
+  folder: FolderTreeNode;
+  depth: number;
+  isExpanded: boolean;
+  isDropTarget: boolean;
+  onToggle: (path: string) => void;
+  onContextMenu: (e: React.MouseEvent, folderPath: string) => void | Promise<void>;
+  dndEnabled: boolean;
+}) {
+  const droppable = useDroppable({
+    id: `drop:folder:${folder.path}`,
+    disabled: !dndEnabled,
+  });
+  const draggable = useDraggable({
+    id: `drag:folder:${folder.path}`,
+    data: {
+      type: "folder",
+      id: folder.path,
+      label: folder.name,
+    } as DragDescriptor,
+    disabled: !dndEnabled,
+  });
+
+  const setNodeRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      droppable.setNodeRef(node);
+      draggable.setNodeRef(node);
+    },
+    [droppable, draggable]
+  );
+
+  return (
+    <button
+      ref={setNodeRef}
+      onClick={() => onToggle(folder.path)}
+      onContextMenu={(e) => onContextMenu(e, folder.path)}
+      className={`w-full flex items-center gap-1.5 py-1.5 pr-2 rounded-md text-text-muted hover:text-text transition-colors ${
+        isDropTarget ? "bg-bg-emphasis ring-1 ring-accent/60" : "hover:bg-bg-muted"
+      }`}
+      style={{
+        paddingLeft: `${8 + depth * 14}px`,
+        transform: CSS.Translate.toString(draggable.transform),
+        opacity: draggable.isDragging ? 0.45 : 1,
+      }}
+      {...(dndEnabled ? draggable.attributes : {})}
+      {...(dndEnabled ? draggable.listeners : {})}
+    >
+      {isExpanded ? (
+        <ChevronDownIcon className="w-3.5 h-3.5 stroke-[1.9] shrink-0" />
+      ) : (
+        <ChevronRightIcon className="w-3.5 h-3.5 stroke-[1.9] shrink-0" />
+      )}
+      <FolderIcon className="w-3.75 h-3.75 stroke-[1.9] shrink-0" />
+      <span className="text-xs font-medium truncate">{folder.name}</span>
+    </button>
+  );
 }
 
 const NoteItem = memo(function NoteItem({
@@ -222,6 +389,8 @@ export function NoteList({
     createFolder,
     createNoteInFolder,
     deleteFolder,
+    moveNote,
+    moveFolder,
   } =
     useNotesActions();
 
@@ -235,9 +404,21 @@ export function NoteList({
   const [createFolderError, setCreateFolderError] = useState<string | null>(null);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [activeDrag, setActiveDrag] = useState<DragDescriptor | null>(null);
+  const [hoverDropTarget, setHoverDropTarget] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastHandledToggleSignalRef = useRef(0);
   const lastHandledCreateRootSignalRef = useRef(0);
+  const hoverExpandTimeoutRef = useRef<number | null>(null);
+
+  const dndEnabled = !searchQuery.trim();
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 4,
+      },
+    })
+  );
 
   // Calculate pinned IDs set for efficient lookup
   const pinnedIds = useMemo(
@@ -515,6 +696,133 @@ export function NoteList({
     openCreateFolderDialog(null);
   }, [createRootFolderSignal, openCreateFolderDialog]);
 
+  useEffect(
+    () => () => {
+      if (hoverExpandTimeoutRef.current) {
+        window.clearTimeout(hoverExpandTimeoutRef.current);
+      }
+    },
+    []
+  );
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const descriptor = parseDragDescriptor(String(event.active.id));
+    if (!descriptor) return;
+    const data = event.active.data.current as Partial<DragDescriptor> | undefined;
+    setActiveDrag({
+      ...descriptor,
+      label: data?.label || descriptor.label,
+    });
+  }, []);
+
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const overId = event.over ? String(event.over.id) : null;
+      setHoverDropTarget(overId);
+
+      const folderTarget = overId ? parseDropTargetFolder(overId) : undefined;
+      if (!folderTarget) {
+        if (hoverExpandTimeoutRef.current) {
+          window.clearTimeout(hoverExpandTimeoutRef.current);
+          hoverExpandTimeoutRef.current = null;
+        }
+        return;
+      }
+
+      if (expandedFolders.has(folderTarget)) return;
+
+      if (hoverExpandTimeoutRef.current) {
+        window.clearTimeout(hoverExpandTimeoutRef.current);
+      }
+      hoverExpandTimeoutRef.current = window.setTimeout(() => {
+        setExpandedFolders((prev) => {
+          if (prev.has(folderTarget)) return prev;
+          const next = new Set(prev);
+          next.add(folderTarget);
+          return next;
+        });
+      }, 450);
+    },
+    [expandedFolders]
+  );
+
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      setActiveDrag(null);
+      setHoverDropTarget(null);
+      if (hoverExpandTimeoutRef.current) {
+        window.clearTimeout(hoverExpandTimeoutRef.current);
+        hoverExpandTimeoutRef.current = null;
+      }
+
+      const descriptor = parseDragDescriptor(String(event.active.id));
+      const overId = event.over ? String(event.over.id) : null;
+      const targetFolderRaw = overId === null ? null : parseDropTargetFolder(overId);
+      if (!descriptor) return;
+      if (overId !== null && targetFolderRaw === undefined) return;
+      const targetFolder = targetFolderRaw ?? null;
+
+      try {
+        if (descriptor.type === "note") {
+          const currentParent = parentFolderPath(descriptor.id);
+          if (currentParent === targetFolder) return;
+          await moveNote(descriptor.id, targetFolder);
+          if (targetFolder) {
+            setExpandedFolders((prev) => new Set(prev).add(targetFolder));
+          }
+          toast.success("Note moved");
+          return;
+        }
+
+        if (targetFolder === descriptor.id || targetFolder?.startsWith(`${descriptor.id}/`)) {
+          toast.error("Cannot move a folder into itself");
+          return;
+        }
+
+        const currentParent = parentFolderPath(descriptor.id);
+        if (currentParent === targetFolder) return;
+
+        const oldPath = descriptor.id;
+        const newPath = targetFolder
+          ? `${targetFolder}/${folderName(descriptor.id)}`
+          : folderName(descriptor.id);
+
+        await moveFolder(descriptor.id, targetFolder);
+
+        setExpandedFolders((prev) => {
+          const next = new Set<string>();
+          for (const path of prev) {
+            if (path === oldPath || path.startsWith(`${oldPath}/`)) {
+              const suffix = path.slice(oldPath.length);
+              next.add(`${newPath}${suffix}`);
+            } else {
+              next.add(path);
+            }
+          }
+          if (targetFolder) {
+            next.add(targetFolder);
+          }
+          next.add(newPath);
+          return next;
+        });
+
+        toast.success("Folder moved");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Move failed");
+      }
+    },
+    [moveNote, moveFolder]
+  );
+
+  const handleDragCancel = useCallback(() => {
+    setActiveDrag(null);
+    setHoverDropTarget(null);
+    if (hoverExpandTimeoutRef.current) {
+      window.clearTimeout(hoverExpandTimeoutRef.current);
+      hoverExpandTimeoutRef.current = null;
+    }
+  }, []);
+
   const renderFolderTree = (node: FolderTreeNode, depth: number): ReactNode[] => {
     const rows: ReactNode[] = [];
 
@@ -525,21 +833,16 @@ export function NoteList({
     for (const folder of childFolders) {
       const isExpanded = expandedFolders.has(folder.path);
       rows.push(
-        <button
+        <FolderRow
           key={`folder-${folder.path}`}
-          onClick={() => toggleFolder(folder.path)}
-          onContextMenu={(e) => handleFolderContextMenu(e, folder.path)}
-          className="w-full flex items-center gap-1.5 py-1.5 pr-2 rounded-md hover:bg-bg-muted text-text-muted hover:text-text transition-colors"
-          style={{ paddingLeft: `${8 + depth * 14}px` }}
-        >
-          {isExpanded ? (
-            <ChevronDownIcon className="w-3.5 h-3.5 stroke-[1.9] shrink-0" />
-          ) : (
-            <ChevronRightIcon className="w-3.5 h-3.5 stroke-[1.9] shrink-0" />
-          )}
-          <FolderIcon className="w-3.75 h-3.75 stroke-[1.9] shrink-0" />
-          <span className="text-xs font-medium truncate">{folder.name}</span>
-        </button>
+          folder={folder}
+          depth={depth}
+          isExpanded={isExpanded}
+          isDropTarget={hoverDropTarget === `drop:folder:${folder.path}`}
+          onToggle={toggleFolder}
+          onContextMenu={handleFolderContextMenu}
+          dndEnabled={dndEnabled}
+        />
       );
 
       if (isExpanded) {
@@ -549,22 +852,16 @@ export function NoteList({
 
     for (const item of node.notes) {
       rows.push(
-        <div
+        <DraggableNoteRow
           key={item.id}
-          style={{ paddingLeft: `${depth > 0 ? 8 + depth * 14 : 0}px` }}
-        >
-          <NoteItem
-            id={item.id}
-            title={item.title}
-            preview={item.preview}
-            modified={item.modified}
-            isSelected={selectedNoteId === item.id}
-            isPinned={pinnedIds.has(item.id)}
-            onSelect={selectNote}
-            onContextMenu={handleContextMenu}
-            showFolderPrefix={false}
-          />
-        </div>
+          item={item}
+          depth={depth}
+          selectedNoteId={selectedNoteId}
+          pinnedIds={pinnedIds}
+          selectNote={selectNote}
+          handleContextMenu={handleContextMenu}
+          dndEnabled={dndEnabled}
+        />
       );
     }
 
@@ -572,6 +869,7 @@ export function NoteList({
   };
 
   let content: ReactNode;
+  const showRootDropHint = Boolean(activeDrag) && hoverDropTarget === null;
   if (isLoading && notes.length === 0) {
     content = <div className="p-4 text-center text-text-muted select-none">Loading...</div>;
   } else if (searchQuery.trim() && displayItems.length === 0) {
@@ -587,23 +885,51 @@ export function NoteList({
       <div
         ref={containerRef}
         tabIndex={0}
-        className="flex flex-col gap-1 p-1.5 outline-none"
+        className={`flex flex-col gap-1 p-1.5 outline-none rounded-md transition-colors ${
+          showRootDropHint ? "bg-bg-emphasis/55 ring-1 ring-accent/35" : ""
+        }`}
       >
-        {searchQuery.trim()
-          ? displayItems.map((item) => (
-              <NoteItem
-                key={item.id}
-                id={item.id}
-                title={item.title}
-                preview={item.preview}
-                modified={item.modified}
-                isSelected={selectedNoteId === item.id}
-                isPinned={pinnedIds.has(item.id)}
-                onSelect={selectNote}
-                onContextMenu={handleContextMenu}
-              />
-            ))
-          : renderFolderTree(folderTree, 0)}
+        {showRootDropHint && (
+          <div className="px-2 py-1 text-[11px] text-text-muted select-none">
+            Drop here to move to root
+          </div>
+        )}
+        {searchQuery.trim() ? (
+          displayItems.map((item) => (
+            <NoteItem
+              key={item.id}
+              id={item.id}
+              title={item.title}
+              preview={item.preview}
+              modified={item.modified}
+              isSelected={selectedNoteId === item.id}
+              isPinned={pinnedIds.has(item.id)}
+              onSelect={selectNote}
+              onContextMenu={handleContextMenu}
+            />
+          ))
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={pointerWithin}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={(event) => {
+              void handleDragEnd(event);
+            }}
+            onDragCancel={handleDragCancel}
+          >
+            {renderFolderTree(folderTree, 0)}
+            <DragOverlay>
+              {activeDrag ? (
+                <div className="rounded-md border border-border bg-bg px-2 py-1 text-xs text-text shadow-lg">
+                  {activeDrag.type === "folder" ? "Folder: " : "Note: "}
+                  {activeDrag.label}
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        )}
       </div>
     );
   }

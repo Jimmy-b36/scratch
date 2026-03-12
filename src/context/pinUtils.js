@@ -17,3 +17,12 @@ export function transferPinnedId(pinnedIds, fromId, toId) {
   return pinnedIds.map((id) => (id === fromId ? toId : id));
 }
 
+export function remapPinnedIdsForFolderMove(pinnedIds, fromPath, toPath) {
+  if (!fromPath || !toPath || fromPath === toPath) return pinnedIds;
+  const fromPrefix = `${fromPath}/`;
+  return pinnedIds.map((id) => {
+    if (id === fromPath) return toPath;
+    if (!id.startsWith(fromPrefix)) return id;
+    return `${toPath}/${id.slice(fromPrefix.length)}`;
+  });
+}

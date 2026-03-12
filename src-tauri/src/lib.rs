@@ -37,6 +37,20 @@ pub struct Note {
     pub modified: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveNoteResult {
+    pub from_id: String,
+    pub to_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveFolderResult {
+    pub from_path: String,
+    pub to_path: String,
+}
+
 // Theme color customization
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -972,6 +986,158 @@ fn delete_folder_impl(notes_root: &Path, path: &str) -> Result<String, String> {
     Ok(rel)
 }
 
+fn move_note_impl(
+    notes_root: &Path,
+    id: &str,
+    target_folder_path: Option<&str>,
+) -> Result<MoveNoteResult, String> {
+    let source_abs = abs_path_from_id(notes_root, id)?;
+    if !source_abs.exists() {
+        return Err("Note not found".to_string());
+    }
+    if !source_abs.is_file() {
+        return Err("Path is not a note file".to_string());
+    }
+
+    let source_file_name = source_abs
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Invalid note filename".to_string())?
+        .to_string();
+
+    let target_parent_parts =
+        normalize_folder_rel_path(target_folder_path.unwrap_or(""), "target folder path")?;
+    let target_parent = if target_parent_parts.is_empty() {
+        notes_root.to_path_buf()
+    } else {
+        let rel = target_parent_parts.join("/");
+        let abs = notes_root.join(&rel);
+        if !abs.starts_with(notes_root) {
+            return Err("Invalid target folder path: path escapes notes folder".to_string());
+        }
+        if !abs.exists() {
+            return Err("Target folder does not exist".to_string());
+        }
+        if !abs.is_dir() {
+            return Err("Target path is not a folder".to_string());
+        }
+        abs
+    };
+
+    let target_abs = target_parent.join(&source_file_name);
+    if !target_abs.starts_with(notes_root) {
+        return Err("Invalid target path: path escapes notes folder".to_string());
+    }
+
+    let to_id = id_from_abs_path(notes_root, &target_abs)
+        .ok_or_else(|| "Failed to determine destination note ID".to_string())?;
+    if to_id == id {
+        return Ok(MoveNoteResult {
+            from_id: id.to_string(),
+            to_id,
+        });
+    }
+
+    if target_abs.exists() {
+        return Err("A note with the same name already exists in that folder".to_string());
+    }
+
+    std::fs::rename(&source_abs, &target_abs).map_err(|e| e.to_string())?;
+
+    Ok(MoveNoteResult {
+        from_id: id.to_string(),
+        to_id,
+    })
+}
+
+fn move_folder_impl(
+    notes_root: &Path,
+    path: &str,
+    target_parent_path: Option<&str>,
+) -> Result<MoveFolderResult, String> {
+    let source_parts = normalize_folder_rel_path(path, "folder path")?;
+    if source_parts.is_empty() {
+        return Err("Folder path cannot be empty".to_string());
+    }
+    let source_rel = source_parts.join("/");
+    let source_abs = notes_root.join(&source_rel);
+    if !source_abs.starts_with(notes_root) {
+        return Err("Invalid folder path: path escapes notes folder".to_string());
+    }
+    if !source_abs.exists() {
+        return Err("Folder does not exist".to_string());
+    }
+    if !source_abs.is_dir() {
+        return Err("Path is not a folder".to_string());
+    }
+
+    let target_parent_parts =
+        normalize_folder_rel_path(target_parent_path.unwrap_or(""), "target parent path")?;
+    let target_parent_abs = if target_parent_parts.is_empty() {
+        notes_root.to_path_buf()
+    } else {
+        let rel = target_parent_parts.join("/");
+        let abs = notes_root.join(&rel);
+        if !abs.starts_with(notes_root) {
+            return Err("Invalid target parent path: path escapes notes folder".to_string());
+        }
+        if !abs.exists() {
+            return Err("Target parent folder does not exist".to_string());
+        }
+        if !abs.is_dir() {
+            return Err("Target parent path is not a folder".to_string());
+        }
+        abs
+    };
+
+    let source_name = source_parts
+        .last()
+        .ok_or_else(|| "Folder path cannot be empty".to_string())?
+        .to_string();
+    let mut destination_parts = target_parent_parts;
+    destination_parts.push(source_name);
+    let destination_rel = destination_parts.join("/");
+
+    if destination_rel == source_rel {
+        return Ok(MoveFolderResult {
+            from_path: source_rel,
+            to_path: destination_rel,
+        });
+    }
+    if destination_rel.starts_with(&(source_rel.clone() + "/")) {
+        return Err("Cannot move a folder into itself or its descendants".to_string());
+    }
+
+    let destination_abs = target_parent_abs.join(
+        destination_parts
+            .last()
+            .ok_or_else(|| "Invalid destination path".to_string())?,
+    );
+    if !destination_abs.starts_with(notes_root) {
+        return Err("Invalid destination path: path escapes notes folder".to_string());
+    }
+    if destination_abs.exists() {
+        return Err("A file or folder with that name already exists in target folder".to_string());
+    }
+
+    std::fs::rename(&source_abs, &destination_abs).map_err(|e| e.to_string())?;
+
+    Ok(MoveFolderResult {
+        from_path: source_rel,
+        to_path: destination_rel,
+    })
+}
+
+fn remap_note_id_with_prefix(id: &str, from_prefix: &str, to_prefix: &str) -> String {
+    if id == from_prefix {
+        return to_prefix.to_string();
+    }
+    if let Some(suffix) = id.strip_prefix(&(from_prefix.to_string() + "/")) {
+        return format!("{}/{}", to_prefix, suffix);
+    }
+    id.to_string()
+}
+
 // Get app config file path (in app data directory)
 fn get_app_config_path(app: &AppHandle) -> Result<PathBuf> {
     let app_data = app.path().app_data_dir()?;
@@ -1260,6 +1426,82 @@ fn delete_folder(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+async fn move_note(
+    window: tauri::Window,
+    id: String,
+    target_folder_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<MoveNoteResult, String> {
+    let folder = require_notes_folder_for_window(state.inner(), Some(window.label()))?;
+    let root = PathBuf::from(&folder);
+    let moved = move_note_impl(&root, &id, target_folder_path.as_deref())?;
+
+    {
+        let indexes = state.search_index.lock().expect("search index mutex");
+        if let Some(search_index) = indexes.get(window.label()) {
+            let _ = search_index.rebuild_index(&root);
+        }
+    }
+
+    {
+        let mut cache = state.notes_cache.write().expect("cache write lock");
+        if let Some(per_window) = cache.get_mut(window.label()) {
+            if let Some(mut note) = per_window.remove(&moved.from_id) {
+                note.id = moved.to_id.clone();
+                per_window.insert(moved.to_id.clone(), note);
+            }
+        }
+    }
+
+    Ok(moved)
+}
+
+#[tauri::command]
+async fn move_folder(
+    window: tauri::Window,
+    path: String,
+    target_parent_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<MoveFolderResult, String> {
+    let folder = require_notes_folder_for_window(state.inner(), Some(window.label()))?;
+    let root = PathBuf::from(&folder);
+    let moved = move_folder_impl(&root, &path, target_parent_path.as_deref())?;
+
+    {
+        let indexes = state.search_index.lock().expect("search index mutex");
+        if let Some(search_index) = indexes.get(window.label()) {
+            let _ = search_index.rebuild_index(&root);
+        }
+    }
+
+    {
+        let mut cache = state.notes_cache.write().expect("cache write lock");
+        if let Some(per_window) = cache.get_mut(window.label()) {
+            let old_prefix = moved.from_path.clone();
+            let new_prefix = moved.to_path.clone();
+            let old_prefix_with_sep = format!("{}/", old_prefix);
+
+            let mut updates: Vec<(String, NoteMetadata)> = Vec::new();
+            let keys: Vec<String> = per_window.keys().cloned().collect();
+            for key in keys {
+                if key == old_prefix || key.starts_with(&old_prefix_with_sep) {
+                    if let Some(mut meta) = per_window.remove(&key) {
+                        let new_id = remap_note_id_with_prefix(&key, &old_prefix, &new_prefix);
+                        meta.id = new_id.clone();
+                        updates.push((new_id, meta));
+                    }
+                }
+            }
+            for (new_id, meta) in updates {
+                per_window.insert(new_id, meta);
+            }
+        }
+    }
+
+    Ok(moved)
 }
 
 #[tauri::command]
@@ -3640,6 +3882,8 @@ pub fn run() {
             create_note_in_folder,
             create_folder,
             delete_folder,
+            move_note,
+            move_folder,
             get_settings,
             update_settings,
             preview_note_name,
@@ -3790,5 +4034,61 @@ mod tests {
         assert!(delete_folder_impl(&dir.path, "/absolute").is_err());
         assert!(delete_folder_impl(&dir.path, ".scratch").is_err());
         assert!(delete_folder_impl(&dir.path, "Missing").is_err());
+    }
+
+    #[test]
+    fn move_note_impl_moves_note_to_target_folder() {
+        let dir = TempDirGuard::new("scratch-move-note");
+        std::fs::create_dir_all(dir.path.join("Inbox")).expect("create source folder");
+        std::fs::create_dir_all(dir.path.join("Archive")).expect("create target folder");
+        std::fs::write(dir.path.join("Inbox").join("hello.md"), "# Hello").expect("write note");
+
+        let result = move_note_impl(&dir.path, "Inbox/hello", Some("Archive")).expect("move note");
+        assert_eq!(result.from_id, "Inbox/hello");
+        assert_eq!(result.to_id, "Archive/hello");
+        assert!(!dir.path.join("Inbox").join("hello.md").exists());
+        assert!(dir.path.join("Archive").join("hello.md").exists());
+    }
+
+    #[test]
+    fn move_note_impl_rejects_collisions() {
+        let dir = TempDirGuard::new("scratch-move-note-collision");
+        std::fs::create_dir_all(dir.path.join("Inbox")).expect("create source folder");
+        std::fs::create_dir_all(dir.path.join("Archive")).expect("create target folder");
+        std::fs::write(dir.path.join("Inbox").join("hello.md"), "# Hello").expect("write source note");
+        std::fs::write(dir.path.join("Archive").join("hello.md"), "# Existing")
+            .expect("write existing note");
+
+        assert!(move_note_impl(&dir.path, "Inbox/hello", Some("Archive")).is_err());
+    }
+
+    #[test]
+    fn move_folder_impl_moves_folder_and_contents() {
+        let dir = TempDirGuard::new("scratch-move-folder");
+        std::fs::create_dir_all(dir.path.join("Projects").join("Q1")).expect("create folder tree");
+        std::fs::create_dir_all(dir.path.join("Archive")).expect("create destination parent");
+        std::fs::write(dir.path.join("Projects").join("Q1").join("plan.md"), "# Plan")
+            .expect("write note");
+
+        let result = move_folder_impl(&dir.path, "Projects", Some("Archive")).expect("move folder");
+        assert_eq!(result.from_path, "Projects");
+        assert_eq!(result.to_path, "Archive/Projects");
+        assert!(!dir.path.join("Projects").exists());
+        assert!(dir
+            .path
+            .join("Archive")
+            .join("Projects")
+            .join("Q1")
+            .join("plan.md")
+            .exists());
+    }
+
+    #[test]
+    fn move_folder_impl_rejects_invalid_destinations() {
+        let dir = TempDirGuard::new("scratch-move-folder-invalid");
+        std::fs::create_dir_all(dir.path.join("Projects").join("Q1")).expect("create folder tree");
+
+        assert!(move_folder_impl(&dir.path, "Projects", Some("Projects/Q1")).is_err());
+        assert!(move_folder_impl(&dir.path, "Projects", Some("Missing")).is_err());
     }
 }
