@@ -851,19 +851,22 @@ ul[data-type="taskList"] {
 }
 
 ul[data-type="taskList"] li {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.4rem;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: start;
+  column-gap: 0.5rem;
   margin: 0;
   padding: 0;
 }
 
 ul[data-type="taskList"] li > label {
-  flex-shrink: 0;
+  width: 1rem;
   user-select: none;
   display: flex;
-  align-items: center;
-  height: 1.6em; /* Match text line height */
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 0.24em; /* Align checkbox with first text baseline */
+  height: auto;
 }
 
 ul[data-type="taskList"] li > label input[type="checkbox"] {
@@ -875,7 +878,7 @@ ul[data-type="taskList"] li > label input[type="checkbox"] {
 }
 
 ul[data-type="taskList"] li > div {
-  flex: 1;
+  width: 100%;
   min-width: 0;
 }
 

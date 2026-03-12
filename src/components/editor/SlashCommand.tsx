@@ -26,6 +26,7 @@ import {
 } from "../icons";
 import { SlashCommandList, type SlashCommandListRef } from "./SlashCommandList";
 import { insertObsidianFrontmatter } from "./frontmatterUtils";
+import { toggleTaskListWithConversion } from "./taskListUtils";
 
 export interface SlashCommandItem {
   title: string;
@@ -105,7 +106,7 @@ const SLASH_COMMANDS: SlashCommandItem[] = [
     icon: <CheckSquareIcon />,
     aliases: ["todo", "checklist", "checkbox"],
     command: (editor) => {
-      editor.chain().focus().toggleTaskList().run();
+      toggleTaskListWithConversion(editor);
     },
   },
   {

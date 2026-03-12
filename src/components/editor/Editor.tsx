@@ -58,6 +58,7 @@ import { useSourceMode } from "./useSourceMode";
 import { ScratchBlockMath, normalizeBlockMath } from "./MathExtensions";
 import { cn } from "../../lib/utils";
 import { plainTextFromMarkdown } from "../../lib/plainText";
+import { toggleTaskListWithConversion } from "./taskListUtils";
 import { Button, IconButton, ToolbarButton, Tooltip } from "../ui";
 import { downloadPdf, downloadMarkdown } from "../../services/pdf";
 import {
@@ -291,7 +292,7 @@ function FormatBar({
         <ListOrderedIcon className="w-4.5 h-4.5 stroke-[1.5]" />
       </ToolbarButton>
       <ToolbarButton
-        onClick={() => editor.chain().focus().toggleTaskList().run()}
+        onClick={() => toggleTaskListWithConversion(editor)}
         isActive={editor.isActive("taskList")}
         title="Task List"
       >
@@ -995,6 +996,13 @@ export function Editor({
       },
       // Trap Tab key inside the editor
       handleKeyDown: (_view, event) => {
+        if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === "9") {
+          const currentEditor = editorRef.current;
+          if (currentEditor) {
+            return toggleTaskListWithConversion(currentEditor);
+          }
+        }
+
         if (event.key === "Tab") {
           // Allow default tab behavior (indent in lists, etc.)
           // but prevent focus from leaving the editor
